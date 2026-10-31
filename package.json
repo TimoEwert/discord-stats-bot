@@ -1,0 +1,14 @@
+{
+  "name": "discord-stats-bot",
+  "version": "1.0.0",
+  "description": "Discord Voice & Online Stats Bot mit Railway PostgreSQL",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "pg": "^8.11.3"
+  }
+}
