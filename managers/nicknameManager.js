@@ -33,12 +33,12 @@ class NicknameManager {
                 activeVoiceTimers.delete(member.id);
             }
 
-            console.log(`⚠️ [NICKNAME] Setze .⚠️⚠️⚠️ für ${member.user.tag}`);
+            console.log(`⚠️ [NICKNAME] Setze .⚠️⚠️⚠️ für User-ID ${member.id}`);
             await this.updateMemberNickname(member, true);
 
             const timer = setTimeout(async () => {
                 activeVoiceTimers.delete(member.id);
-                console.log(`⏱️ [NICKNAME] Timer abgelaufen für ${member.user.tag}, entferne .⚠️⚠️⚠️.`);
+                console.log(`⏱️ [NICKNAME] Timer abgelaufen für User-ID ${member.id}, entferne .⚠️⚠️⚠️.`);
                 await this.updateMemberNickname(member, false);
             }, 10 * 1000);
 
@@ -85,12 +85,12 @@ class NicknameManager {
 
             if (member.displayName !== newName) {
                 await member.setNickname(newName);
-                console.log(`✅ [NICKNAME] Nickname für ${member.user.tag} geändert zu: ${newName}`);
+                console.log(`✅ [NICKNAME] Nickname für User-ID ${member.id} geändert zu: ${newName}`);
                 return true;
             }
         } catch (e) {
             if (e.code !== 50013) {
-                console.error(`❌ [NICKNAME ERROR] ${member.user.tag}:`, e.message);
+                console.error(`❌ [NICKNAME ERROR] User-ID ${member.id}:`, e.message);
             }
         }
         return false;
