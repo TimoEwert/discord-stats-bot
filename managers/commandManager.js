@@ -1,7 +1,6 @@
 // managers/commandManager.js
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { pool } = require('../database');
-const nicknameManager = './nicknameManager'; // Achtung: Import erfolgt weiter unten über die Referenz
 
 class CommandManager {
     constructor() {
@@ -70,22 +69,40 @@ class CommandManager {
             }
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
-                const result = await pool.query(`SELECT username, SUM(duration_seconds) as total_seconds FROM voice_sessions GROUP BY username ORDER BY total_seconds DESC LIMIT 10`);
+                
+                // Aggregiere nach user_id und summiere die Minuten auf
+                const result = await pool.query(`SELECT user_id, username, SUM(duration_minutes) as total_minutes FROM voice_sessions GROUP BY user_id, username ORDER BY total_minutes DESC LIMIT 10`);
                 const embed = new EmbedBuilder().setColor(0x00AE86).setTitle('🏆 ARIES COMMUNITY - VOICE RANKING').setTimestamp();
                 
                 if (result.rows.length === 0) {
                     embed.addFields({ name: 'Keine Daten', value: 'Es wurden noch keine Voice-Zeiten aufgezeichnet.' });
                 } else {
                     let desc = '';
-                    result.rows.forEach((row, i) => {
-                        const h = Math.floor(row.total_seconds / 3600);
-                        const m = Math.floor((row.total_seconds % 3600) / 60);
+                    for (let i = 0; i < result.rows.length; i++) {
+                        const row = result.rows[i];
+                        
+                        // Serverspezifischen Namen (DisplayName) live ermitteln
+                        let displayName = row.username;
+                        try {
+                            const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
+                            if (member) {
+                                displayName = member.displayName
+                                    .replace(/^[🔴⚠️.]+/g, '')
+                                    .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
+                                    .trim();
+                            }
+                        } catch (err) {}
+
+                        const h = Math.floor(row.total_minutes / 60);
+                        const m = row.total_minutes % 60;
+                        
                         let medal = `#${i + 1}`;
                         if (i === 0) medal = '🥇';
                         if (i === 1) medal = '🥈';
                         if (i === 2) medal = '🥉';
-                        desc += `${medal} **${row.username}** — 🎙️ **${h}h ${m}m**\n`;
-                    });
+                        
+                        desc += `${medal} **${displayName}** — 🎙️ **${h}h ${m}m** (${row.total_minutes} Min.)\n`;
+                    }
                     embed.setDescription(desc);
                 }
                 await interaction.editReply({ embeds: [embed] });
@@ -104,12 +121,10 @@ class CommandManager {
                 const members = await interaction.guild.members.fetch();
                 let updatedCount = 0;
                 
-                // Lokaler Import des nicknameManagers, um zirkuläre Abhängigkeiten beim Start zu vermeiden
                 const nicknameManager = require('./nicknameManager');
 
                 for (const [_, member] of members) {
                     if (member.user.bot) continue;
-                    // WICHTIG: Hier wird explizit `false` übergeben, damit die Klassen-Icons gesetzt werden!
                     const changed = await nicknameManager.updateMemberNickname(member, false);
                     if (changed) {
                         updatedCount++;
