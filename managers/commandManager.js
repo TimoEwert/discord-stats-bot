@@ -25,12 +25,14 @@ class CommandManager {
         try {
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
-                const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
+                
+                // Hole alle Voice-Kanäle direkt frisch von der Discord-API, um Cache-Fehler zu umgehen
+                const fetchedChannels = await interaction.guild.channels.fetch();
+                const voiceChannels = fetchedChannels.filter(c => c && c.isVoiceBased());
+                
                 let count = 0;
-                for (const [_, channel] of channels) {
-                    // Robuste UTF-8-Wandlung über einen korrekten Buffer, um kaputte Bytestreams abzufangen
-                    let cleanName = Buffer.from(channel.name, 'utf8').toString('utf8');
-                    cleanName = cleanName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                for (const [_, channel] of voiceChannels) {
+                    let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
                     await pool.query(
                         `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
@@ -38,8 +40,8 @@ class CommandManager {
                     );
                     count++;
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen erfolgreich in DB gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich gespeichert!`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt über API in DB gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich über die API gespeichert!`);
             }
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
