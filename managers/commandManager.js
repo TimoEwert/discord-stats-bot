@@ -23,7 +23,7 @@ class CommandManager {
         console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
 
         try {
-            // Befehl zum Speichern der aktuellen Sprachkanal-Namen direkt aus dem Bot-Cache
+            // Befehl zum Speichern der aktuellen Sprachkanal-Namen
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
@@ -33,12 +33,26 @@ class CommandManager {
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
 
-                for (const [_, channel] of channels) {
-                    // Nutze den Live-Cache des Bots, da dieser die Unicode-Zeichen vor dem API-Filter im RAM behält
-                    let rawName = channel.name.normalize('NFC');
-                    let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                // Bekannte Problem-Kanäle, bei denen Discord den Bytestream für Bots beschädigt, 
+                // direkt als sauberes Unicode hinterlegen (der Rest läuft dynamisch).
+                const manualOverrides = {
+                    // Trage hier bei Bedarf Kanal-IDs als Fallback ein, falls Discord sie beschädigt:
+                    // "1558396597702889522": "🎧︱Cyrills Playlist",
+                    // "1558396122580390019": "🗨️| Community Hangout"
+                };
 
-                    // Base64-Transport als absolute Absicherung gegen Treiber-Konvertierungsfehler
+                for (const [_, channel] of channels) {
+                    let cleanName;
+
+                    // Prüfen, ob für diesen Kanal ein Override existiert, sonst dynamisch verarbeiten
+                    if (manualOverrides[channel.id]) {
+                        cleanName = manualOverrides[channel.id];
+                    } else {
+                        let rawName = channel.name.normalize('NFC');
+                        cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                    }
+
+                    // Base64-Transport zur absolut sicheren DB-Übergabe
                     let base64Name = Buffer.from(cleanName, 'utf8').toString('base64');
 
                     await pool.query(
@@ -50,8 +64,8 @@ class CommandManager {
                     );
                     count++;
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen sicher aus dem Bot-Cache gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich aus dem Bot-Cache gespeichert!`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen erfolgreich gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich gespeichert!`);
             }
             // Befehl zum Zurücksetzen der Sprachkanäle
             else if (interaction.commandName === 'reset_channel_refs') {
