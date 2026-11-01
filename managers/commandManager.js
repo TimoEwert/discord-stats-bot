@@ -28,7 +28,6 @@ class CommandManager {
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
-                    // Entferne nur aktive Warn-Präfixe wie 🔴 oder ⚠️, behalte aber die Channel-Emojis (💬, 🍻 etc.) bei!
                     let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
                     
                     await pool.query(
@@ -110,7 +109,6 @@ class CommandManager {
             else if (interaction.commandName === 'wochen_stats') {
                 await interaction.deferReply();
                 
-                // Wir holen hier die Gesamtübersicht der letzten Einträge / Stammzeiten (z.B. Top 15 sortiert nach Minuten)
                 const result = await pool.query(`SELECT user_id, username, SUM(duration_minutes) as total_minutes, COUNT(id) as sessions_count FROM voice_sessions GROUP BY user_id, username ORDER BY total_minutes DESC LIMIT 15`);
                 const embed = new EmbedBuilder()
                     .setColor(0x3498DB)
