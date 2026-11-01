@@ -24,9 +24,13 @@ class CommandManager {
 
         try {
             // Befehl zum Speichern der aktuellen Sprachkanal-Namen als Referenz in der Datenbank
-           if (interaction.commandName === 'save_channel_refs') {
+            if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
+                // 🛠️ FIX: Erzwinge striktes UTF-8 für die aktuelle DB-Sitzung, 
+                // damit der Treiber 4-Byte-Emojis (inkl. Variation Selectors) nicht beschädigt.
+                await pool.query("SET client_encoding = 'UTF8'");
+
                 const response = await fetch(`https://discord.com/api/v10/guilds/${interaction.guildId}/channels`, {
                     headers: {
                         Authorization: `Bot ${interaction.client.token}`
@@ -37,17 +41,9 @@ class CommandManager {
 
                 for (const ch of rawChannels) {
                     if (ch.type === 2) {
-                        // 1. Unicode-Normalisierung (NFC), um zusammengesetzte Zeichen zu glätten
+                        // Unicode-Normalisierung und Bereinigung von Präfixen
                         let rawName = ch.name.normalize('NFC');
-
-                        // 2. Ersetze exotische Trennzeichen (wie Fullwidth Vertical Line) durch ein normales Pipe-Zeichen
-                        rawName = rawName.replace(/[\uff5c︱]/g, '|');
-
-                        // 3. Entferne unsichtbare Variation Selectors und Steuerzeichen
-                        let sanitizedName = rawName.replace(/[\uFE0E\uFE0F\u200B-\u200D\uFEFF]/g, '');
-                        
-                        // 4. Präfixe/Suffixe bereinigen
-                        let cleanName = sanitizedName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                        let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
                         await pool.query(
                             `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
@@ -56,13 +52,16 @@ class CommandManager {
                         count++;
                     }
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen normalisiert und gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich normalisiert gespeichert!`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen mit erzwunfenem UTF-8-Client gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich und fehlerfrei gespeichert!`);
             }
             // Befehl zum Zurücksetzen der Sprachkanäle auf die gespeicherten Originalnamen
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
+                // Auch beim Auslesen sauberes UTF-8 erzwingen
+                await pool.query("SET client_encoding = 'UTF8'");
+
                 const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
                 console.log(`🔍 [DB QUERY] Gefundene Kanal-Referenzen in DB: ${result.rows.length}`);
 
