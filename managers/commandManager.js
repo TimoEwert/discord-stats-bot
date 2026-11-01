@@ -3,12 +3,11 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('disc
 const { pool } = require('../database');
 const nicknameManager = require('./nicknameManager');
 
-const CLASS_ICONS = {
-    "Magier": "🔥", "Templer": "🛡️", "Gladiator": "⚔️", "Assasine": "🗡️",
-    "Waldläufer": "🏹", "Beschwörer": "👻", "Kleriker": "❤️", "Kantor": "🔱"
-};
-
 class CommandManager {
+    constructor() {
+        this.name = "CommandManager";
+    }
+
     getCommandBuilders() {
         return [
             new SlashCommandBuilder().setName('sync_nicknames').setDescription('Aktualisiert Klassen-Nicknames').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -28,7 +27,8 @@ class CommandManager {
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
-                    let cleanName = channel.name.replace(/^🔴.*?\s+ging$/, '').trim();
+                    // Säubere den Namen von jeglichen alten Alerts vor dem Speichern
+                    let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
                     await pool.query(
                         `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
                         [channel.id, cleanName || "Voice Channel"]
@@ -41,7 +41,7 @@ class CommandManager {
                 await interaction.deferReply({ flags: [64] });
                 const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
                 if (result.rows.length === 0) {
-                    await interaction.editReply(`❌ Keine Kanal-Referenzen in der Datenbank gefunden.`);
+                    await interaction.editReply(`❌ Keine Kanal-Referenzen in der Datenbank gefunden. Bitte zuerst /save_channel_refs ausführen.`);
                     return;
                 }
                 let resetCount = 0;
@@ -50,10 +50,10 @@ class CommandManager {
                     if (channel && channel.isVoiceBased()) {
                         await channel.setName(row.original_name);
                         resetCount++;
-                        await new Promise(r => setTimeout(r, 1000));
+                        await new Promise(r => setTimeout(r, 300)); // Kurze Pause gegen Rate-Limits
                     }
                 }
-                await interaction.editReply(`✅ **${resetCount}** Sprachkanäle wurden zurückgesetzt!`);
+                await interaction.editReply(`✅ **${resetCount}** Sprachkanäle wurden manuell auf ihre Original-Referenzen zurückgesetzt!`);
             }
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
@@ -95,7 +95,7 @@ class CommandManager {
                     const changed = await nicknameManager.updateMemberNickname(member, client);
                     if (changed) {
                         updatedCount++;
-                        await new Promise(r => setTimeout(r, 150));
+                        await new Promise(r => setTimeout(r, 100));
                     }
                 }
                 await interaction.editReply(`✅ Nicknames für **${updatedCount}** Mitglieder synchronisiert.`);
