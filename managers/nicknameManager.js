@@ -20,7 +20,6 @@ class NicknameManager {
         this.name = "NicknameManager";
     }
 
-    // Lauscht auf Voice-Events und steuert den 10-Sekunden-Warn-Timer exakt wie in deiner alten Version
     async handleVoiceStateUpdate(oldState, newState) {
         const member = newState.member || oldState.member;
         if (!member || member.user.bot) return;
@@ -28,7 +27,6 @@ class NicknameManager {
         const justJoinedVoice = !oldState.channelId && newState.channelId;
         const switchedChannel = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
 
-        // Wenn der User den Channel betritt oder wechselt
         if (justJoinedVoice || switchedChannel) {
             if (activeVoiceTimers.has(member.id)) {
                 clearTimeout(activeVoiceTimers.get(member.id));
@@ -48,7 +46,6 @@ class NicknameManager {
         }
     }
 
-    // Exakte, bewährte Logik aus deiner alten index (5).js
     async updateMemberNickname(member, showWarning = false) {
         const client = member.client;
         if (member.id === member.guild.ownerId || member.id === client.user.id) {
