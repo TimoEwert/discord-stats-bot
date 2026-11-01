@@ -6,6 +6,7 @@ const { initDatabase } = require('./database');
 // Alle Module zentral laden
 const statsManager = require('./managers/statsManager');
 const visualManager = require('./managers/visualManager');
+const nicknameManager = require('./managers/nicknameManager');
 const commandManager = require('./managers/commandManager');
 
 const client = new Client({
@@ -36,10 +37,12 @@ client.once('clientReady', async () => {
     }
 });
 
-// Event: Voice State Update leitet sauber an Stats- und Visual-Manager weiter
+// Event: Voice State Update leitet sauber an Stats-, Visual- und Nickname-Manager weiter
 client.on('voiceStateUpdate', (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
+
+    const displayName = member.displayName;
 
     const justJoined = !oldState.channelId && newState.channelId;
     const justLeft = oldState.channelId && !newState.channelId;
@@ -47,6 +50,7 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 
     if (justJoined) {
         statsManager.handleJoin(member);
+        nicknameManager.triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
     } 
     else if (justLeft) {
         statsManager.handleLeave(member);
@@ -55,7 +59,7 @@ client.on('voiceStateUpdate', (oldState, newState) => {
     else if (switched) {
         statsManager.handleLeave(member);
         statsManager.handleJoin(member);
-        // KEIN visualManager.handleLeave hier, da nur bei komplettem Verlassen umbenannt werden soll!
+        nicknameManager.triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
     }
 });
 
