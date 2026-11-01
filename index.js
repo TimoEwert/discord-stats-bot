@@ -97,10 +97,15 @@ client.once('clientReady', async () => {
             for (const row of result.rows) {
                 const channel = client.channels.cache.get(row.channel_id);
                 if (channel && channel.isVoiceBased()) {
-                    // Wenn kein aktiver Reset-Timer läuft, aber der Name ein Status-Prefix hat -> hart korrigieren
-                    if (!activeChannelResets.has(row.channel_id) && (channel.name.startsWith('🔴') || channel.name.startsWith('🟢') || channel.name.startsWith('🔄'))) {
+                    // Prüfen, ob der Kanalname noch ein Status-Zeichen enthält
+                    if (!activeChannelResets.has(row.channel_id) && (channel.name.startsWith('🔴') || channel.name.startsWith('🟢') || channel.name.startsWith('🔄') || channel.name.includes('ging'))) {
                         console.log(`🛠️ [WATCHDOG] Korrigiere hängengebliebenen Kanal ID ${row.channel_id} ('${channel.name}') -> Referenz: '${row.original_name}'`);
-                        await channel.setName(row.original_name);
+                        try {
+                            await channel.setName(row.original_name);
+                            console.log(`✨ [WATCHDOG SUCCESS] Kanal ${row.channel_id} erfolgreich auf '${row.original_name}' zurückgesetzt.`);
+                        } catch (apiErr) {
+                            console.error(`❌ [WATCHDOG API ERROR] Konnte Kanal ${row.channel_id} nicht umbenennen:`, apiErr.message);
+                        }
                     }
                 }
             }
