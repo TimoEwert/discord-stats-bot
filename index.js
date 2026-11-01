@@ -1,4 +1,4 @@
-// index.js - Version 4.1 (Senior Programming Partner - Komplettversion mit /reset_channel_refs)
+// index.js - Version 4.2 (Senior Programming Partner - Komplettversion mit abgesichertem Reset)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -36,7 +36,7 @@ const ALL_ICONS_ARRAY = [...Object.values(CLASS_ICONS), ".⚠️⚠️⚠️", "
 // Map zur temporären Speicherung der Voice-Startzeiten
 const activeVoiceSessions = new Map();
 
-// Robuste Kanal-Zustandsverwaltung: channelId -> { originalName: string, queue: string[], timeout: NodeJS.Timeout, isProcessing: boolean }
+// Robuste Kanal-Zustandsverwaltung
 const channelStates = new Map();
 
 process.on('unhandledRejection', error => {
@@ -217,7 +217,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // BEFEHL: /reset_channel_refs (Manuelles Zurücksetzen aller Kanäle auf DB-Referenz)
+    // BEFEHL: /reset_channel_refs (Sofortige und abgesicherte Interaktion)
     else if (interaction.commandName === 'reset_channel_refs') {
         await interaction.deferReply({ flags: [64] });
 
@@ -239,9 +239,15 @@ client.on('interactionCreate', async (interaction) => {
 
                 const channel = interaction.guild.channels.cache.get(row.channel_id);
                 if (channel && channel.isVoiceBased()) {
-                    await channel.setName(row.original_name);
-                    resetCount++;
-                    console.log(`🛠️ [MANUAL RESET] Kanal '${channel.name}' manuell auf Referenz '${row.original_name}' zurückgesetzt.`);
+                    try {
+                        await channel.setName(row.original_name);
+                        resetCount++;
+                        console.log(`🛠️ [MANUAL RESET] Kanal '${channel.name}' manuell auf Referenz '${row.original_name}' zurückgesetzt.`);
+                        // Kurze Pause zwischen den API-Calls, um Discord Rate-Limits zu umgehen
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    } catch (err) {
+                        console.error(`❌ [DISCORD API] Konnte Kanal ${row.channel_id} nicht umbenennen:`, err.message);
+                    }
                 }
             }
 
