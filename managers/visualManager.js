@@ -16,15 +16,21 @@ class VisualManager {
                 activeChannelResets.delete(oldChannel.id);
             }
 
+            // Hole den echten Originalnamen aus der DB (niemals vom aktuellen Namen ableiten, um Verschmelzungen zu verhindern!)
             let originalName = "Voice Channel";
             try {
                 const res = await pool.query(`SELECT original_name FROM channel_references WHERE channel_id = $1`, [oldChannel.id]);
-                if (res.rows.length > 0) originalName = res.rows[0].original_name;
+                if (res.rows.length > 0) {
+                    originalName = res.rows[0].original_name;
+                } else {
+                    // Fallback: Säubere jegliche roten Präfixe
+                    originalName = oldChannel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                }
             } catch (e) {
-                originalName = oldChannel.name.replace(/^🔴.*?\s+ging$/, '').trim();
+                originalName = "Voice Channel";
             }
 
-            const alertName = `🔴${member.displayName} ging`.substring(0, 32);
+            const alertName = `🔴${member.user.username} ging`.substring(0, 32);
             await oldChannel.setName(alertName);
             console.log(`🔴 [VISUAL] Kanal ID ${oldChannel.id} auf '${alertName}' gesetzt.`);
 
