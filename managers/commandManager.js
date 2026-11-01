@@ -24,10 +24,9 @@ class CommandManager {
 
         try {
             // Befehl zum Speichern der aktuellen Sprachkanal-Namen als Referenz in der Datenbank
-            if (interaction.commandName === 'save_channel_refs') {
+           if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
-                // Roher HTTP-Fetch direkt an die Discord-API vorbeigeschleust
                 const response = await fetch(`https://discord.com/api/v10/guilds/${interaction.guildId}/channels`, {
                     headers: {
                         Authorization: `Bot ${interaction.client.token}`
@@ -38,11 +37,11 @@ class CommandManager {
 
                 for (const ch of rawChannels) {
                     if (ch.type === 2) {
-                        // Gib den Namen als rohen Hex-Buffer im Terminal aus
-                        const nameBuffer = Buffer.from(ch.name, 'utf8');
-                        console.log(`🔍 [CHANNEL RAW DEBUG] Name: "${ch.name}" | Hex: ${nameBuffer.toString('hex')}`);
-
-                        let cleanName = ch.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                        // 1. Entferne unsichtbare Unicode Variation Selectors (\uFE0F / \uFE0E), die das Encoding zerschießen
+                        let sanitizedName = ch.name.replace(/[\uFE0E\uFE0F]/g, '');
+                        
+                        // 2. Präfixe/Suffixe bereinigen
+                        let cleanName = sanitizedName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
                         await pool.query(
                             `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
@@ -51,7 +50,8 @@ class CommandManager {
                         count++;
                     }
                 }
-                await interaction.editReply(`✅ **${count}** Kanäle im Debug-Modus analysiert! Prüfe die Logs.`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen bereinigt und gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich und fehlerfrei gespeichert!`);
             }
             // Befehl zum Zurücksetzen der Sprachkanäle auf die gespeicherten Originalnamen
             else if (interaction.commandName === 'reset_channel_refs') {
