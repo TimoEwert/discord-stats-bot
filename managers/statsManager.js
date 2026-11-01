@@ -3,12 +3,16 @@ const { pool } = require('../database');
 const activeVoiceSessions = new Map();
 
 class StatsManager {
-    handleJoin(userId, username) {
-        activeVoiceSessions.set(userId, new Date());
+    constructor() {
+        this.name = "StatsManager";
     }
 
-    async handleLeave(userId, username) {
-        const joinTime = activeVoiceSessions.get(userId);
+    handleJoin(member) {
+        activeVoiceSessions.set(member.id, new Date());
+    }
+
+    async handleLeave(member) {
+        const joinTime = activeVoiceSessions.get(member.id);
         if (!joinTime) return;
 
         const leaveTime = new Date();
@@ -18,14 +22,13 @@ class StatsManager {
             try {
                 await pool.query(
                     `INSERT INTO voice_sessions (user_id, username, joined_at, left_at, duration_seconds) VALUES ($1, $2, $3, $4, $5)`,
-                    [userId, username, joinTime, leaveTime, durationSeconds]
+                    [member.id, member.user.tag, joinTime, leaveTime, durationSeconds]
                 );
-                console.log(`💾 [STATS] Session gespeichert für ${username}: ${durationSeconds}s`);
             } catch (err) {
                 console.error('❌ [STATS ERROR] Fehler beim Speichern der Session:', err);
             }
         }
-        activeVoiceSessions.delete(userId);
+        activeVoiceSessions.delete(member.id);
     }
 }
 
