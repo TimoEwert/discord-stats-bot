@@ -9,9 +9,17 @@ class StatsManager {
 
     async handleJoin(member) {
         if (!member || member.user.bot) return;
+
+        // Serverspezifischen Display Name holen und bereinigen
+        let displayName = member.displayName || member.user.username;
+        displayName = displayName
+            .replace(/^[🔴⚠️.]+/g, '')
+            .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
+            .trim();
+
         activeVoiceSessions.set(member.id, {
             joinedAt: new Date(),
-            username: member.user.username // Stabiler Basis-Profilname für die DB
+            username: displayName // Bereinigter Server-Nick für die DB
         });
     }
 
