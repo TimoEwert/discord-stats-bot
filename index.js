@@ -1,4 +1,4 @@
-// index.js - Version 3.4 (Senior Programming Partner - Komplettversion)
+// index.js - Version 3.5 (Senior Programming Partner - Komplettversion)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -114,7 +114,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         const joinTime = activeVoiceSessions.get(userId);
         const leaveTime = new Date();
 
-        // Alte Session für den bisherigen Kanal abschließen und speichern
         if (joinTime) {
             const durationSeconds = Math.floor((leaveTime - joinTime) / 1000);
             if (durationSeconds > 0) {
@@ -129,14 +128,11 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             }
         }
 
-        // Neue Session für den Zielkanal starten
         activeVoiceSessions.set(userId, leaveTime);
 
-        // Visualisierung sowohl im alten Kanal (Verlassen) als auch im neuen Kanal (Betreten)
         await triggerChannelVisual(oldState.channel, `🔴 ${displayName} verlässt`);
         await triggerChannelVisual(newState.channel, `🔄 ${displayName} wechselt`);
 
-        // Klassen/Nicknamen im Hintergrund aktualisieren
         await updateMemberNickname(member);
     }
 });
@@ -231,30 +227,36 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Hilfsfunktion: Sprachkanal-Name mit präzisem Error-Logging für Rate-Limits
+// Hilfsfunktion: Sprachkanal-Name mit stabiler Ursprungsnamen-Sicherung bei schnellen Wechseln
 async function triggerChannelVisual(channel, temporaryName) {
     if (!channel) return;
 
     try {
+        let originalName;
+
         if (channelTimers.has(channel.id)) {
-            clearTimeout(channelTimers.get(channel.id).timeout);
+            // Läuft bereits ein Timer, behalten wir den echten Ursprungsnamen bei und brechen den alten Timer ab
+            const existingData = channelTimers.get(channel.id);
+            clearTimeout(existingData.timeout);
+            originalName = existingData.originalName;
         } else {
+            // Ist der Kanal im Moment sauber (startet nicht mit Status-Emojis), ist das der echte Ursprungsname
             if (!channel.name.startsWith('🟢') && !channel.name.startsWith('🔴') && !channel.name.startsWith('🔄')) {
-                channelTimers.set(channel.id, {
-                    originalName: channel.name,
-                    timeout: null
-                });
+                originalName = channel.name;
+            } else {
+                // Fallback, falls er mitten in einer Animation steckte
+                originalName = channel.name.replace(/^(🟢|🔴|🔄)\s+.*?\s+(betritt|verlässt|wechselt)$/, '').trim();
+                if (!originalName) originalName = "Stammtisch"; // Absoluter Sicherheitsfallback
             }
         }
 
-        const channelData = channelTimers.get(channel.id);
-        if (!channelData) return;
-
+        // Kanal auf temporären Namen setzen
         await channel.setName(temporaryName);
 
+        // Neuen 10-Sekunden-Timer starten
         const timeout = setTimeout(async () => {
             try {
-                await channel.setName(channelData.originalName);
+                await channel.setName(originalName);
             } catch (err) {
                 console.error('❌ Fehler beim Zurücksetzen des Kanalnamens:', err.message);
             } finally {
@@ -262,7 +264,7 @@ async function triggerChannelVisual(channel, temporaryName) {
             }
         }, 10000);
 
-        channelData.timeout = timeout;
+        channelTimers.set(channel.id, { originalName, timeout });
 
     } catch (err) {
         console.error(`❌ Discord API Fehler beim Ändern des Kanalnamens (Code ${err.status || 'unbekannt'}):`, err.message);
