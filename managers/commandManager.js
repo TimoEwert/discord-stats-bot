@@ -21,7 +21,6 @@ class CommandManager {
     async handleInteraction(interaction, client) {
         if (!interaction.isChatInputCommand()) return;
 
-        // DEBUG-LOG: Zeigt sofort in Railway an, welcher Befehl getriggert wurde!
         console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
 
         try {
@@ -37,25 +36,38 @@ class CommandManager {
                     );
                     count++;
                 }
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen erfolgreich in DB gespeichert.`);
                 await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich gespeichert!`);
             }
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
+                
+                // DB-Abfrage ausführen
                 const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
+                console.log(`🔍 [DB QUERY] Gefundene Kanal-Referenzen in DB: ${result.rows.length}`);
+
                 if (result.rows.length === 0) {
                     await interaction.editReply(`❌ Keine Kanal-Referenzen in der Datenbank gefunden. Bitte zuerst /save_channel_refs ausführen.`);
                     return;
                 }
+
                 let resetCount = 0;
                 for (const row of result.rows) {
                     const channel = interaction.guild.channels.cache.get(row.channel_id);
                     if (channel && channel.isVoiceBased()) {
-                        await channel.setName(row.original_name);
-                        resetCount++;
+                        try {
+                            await channel.setName(row.original_name);
+                            console.log(`✨ [RESET SUCCESS] Kanal ID ${row.channel_id} auf '${row.original_name}' zurückgesetzt.`);
+                            resetCount++;
+                        } catch (apiErr) {
+                            console.error(`❌ [DISCORD API ERROR] Konnte Kanal ${row.channel_id} (${row.original_name}) nicht umbenennen:`, apiErr.message);
+                        }
                         await new Promise(r => setTimeout(r, 300));
+                    } else {
+                        console.log(`⚠️ [RESET SKIP] Kanal ID ${row.channel_id} nicht im Cache gefunden oder kein Voice-Kanal.`);
                     }
                 }
-                await interaction.editReply(`✅ **${resetCount}** Sprachkanäle wurden manuell auf ihre Original-Referenzen zurückgesetzt!`);
+                await interaction.editReply(`✅ **${resetCount}** von ${result.rows.length} Sprachkanälen wurden zurückgesetzt!`);
             }
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
