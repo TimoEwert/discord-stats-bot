@@ -20,7 +20,7 @@ class CommandManager {
     async handleInteraction(interaction, client) {
         if (!interaction.isChatInputCommand()) return;
 
-        console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
+        console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User${interaction.user.tag}`);
 
         try {
             // Befehl zum Speichern der aktuellen Sprachkanal-Namen als Referenz in der Datenbank
@@ -29,7 +29,7 @@ class CommandManager {
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
-                    // Umgeht den beschädigten Bot-Cache und lädt den Kanal direkt frisch von der Discord-API
+                    // Umgeht den Bot-Cache und lädt den Kanal direkt frisch von der Discord-API
                     const freshChannel = await interaction.guild.channels.fetch(channel.id, { force: true }).catch(() => channel);
                     let rawName = freshChannel ? freshChannel.name : channel.name;
                     
@@ -69,10 +69,7 @@ class CommandManager {
                         }
                         await new Promise(r => setTimeout(r, 300));
                     } else {
-                        console.log(`⚠️ [RESET SKIP] Kanal ID ${row.channel_id} nicht im Cache gefunden oder kein Voice-Kanal.`);
-                    }
-                }
-                await interaction.editReply(`✅ **${resetCount}** von ${result.rows.length} Sprachkanälen wurden zurückgesetzt!`);
+                        console.log(`⚠️ [RESET SKIP] Kanal ID ${row.channel_id} nicht im Cache gefunden oder kein Voice-Kanal.`); } } await interaction.editReply(`✅ **${resetCount}** von ${result.rows.length} Sprachkanälen wurden zurückgesetzt!`);
             }
             // Befehl zur Anzeige des Voice-Rankings
             else if (interaction.commandName === 'ranking_aries') {
@@ -107,50 +104,4 @@ class CommandManager {
                         if (i === 1) medal = '🥈';
                         if (i === 2) medal = '🥉';
                         
-                        desc += `${medal} **${displayName}** — 🎙️ **${h}h ${m}m** (${row.total_minutes} Min.)\n`;
-                    }
-                    embed.setDescription(desc);
-                }
-                await interaction.editReply({ embeds: [embed] });
-            }
-            // Befehl zur Anzeige der wöchentlichen/allgemeinen Stammzeiten
-            else if (interaction.commandName === 'wochen_stats') {
-                await interaction.deferReply();
-                
-                const result = await pool.query(`SELECT user_id, username, SUM(duration_minutes) as total_minutes, COUNT(id) as sessions_count FROM voice_sessions GROUP BY user_id, username ORDER BY total_minutes DESC LIMIT 15`);
-                const embed = new EmbedBuilder()
-                    .setColor(0x3498DB)
-                    .setTitle('📊 COMMUNITY STAMMZEITEN (Gesamtübersicht)')
-                    .setTimestamp();
-
-                if (result.rows.length === 0) {
-                    embed.setDescription('Es liegen noch keine aufgezeichneten Stammzeiten vor.');
-                } else {
-                    let desc = 'Übersicht der erfassten Sprachkanal-Präsenzen:\n\n';
-                    for (let i = 0; i < result.rows.length; i++) {
-                        const row = result.rows[i];
-                        
-                        let displayName = row.username;
-                        try {
-                            const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
-                            if (member) {
-                                displayName = member.displayName
-                                    .replace(/^[🔴⚠️.]+/g, '')
-                                    .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
-                                    .trim();
-                            }
-                        } catch (err) {}
-
-                        const h = Math.floor(row.total_minutes / 60);
-                        const m = row.total_minutes % 60;
-
-                        desc += `👤 **${displayName}** — ⏱️ **${h}h ${m}m** (${row.total_minutes} Min. in ${row.sessions_count} Sessions)\n`;
-                    }
-                    embed.setDescription(desc);
-                }
-                await interaction.editReply({ embeds: [embed] });
-            }
-            // Befehl zur Synchronisation der Klassen-Nicknames
-            else if (interaction.commandName === 'sync_nicknames') {
-                await interaction.deferReply({ flags: [64] });
-                const members = await
+                        desc += `${medal} **${displayName}** — 🎙️ **${h}h${m
