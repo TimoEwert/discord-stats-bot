@@ -27,15 +27,22 @@ class CommandManager {
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
-                // Holt die rohen Kanal-Daten direkt über die Discord-REST-API ab, um jegliche Discord.js-Cache/Parser-Fehler zu umgehen
-                const rawChannels = await interaction.client.rest.get(`/guilds/${interaction.guildId}/channels`);
+                // Roher HTTP-Fetch direkt an die Discord-API vorbeigeschleust
+                const response = await fetch(`https://discord.com/api/v10/guilds/${interaction.guildId}/channels`, {
+                    headers: {
+                        Authorization: `Bot ${interaction.client.token}`
+                    }
+                });
+                const rawChannels = await response.json();
                 let count = 0;
 
                 for (const ch of rawChannels) {
-                    if (ch.type === 2) { // Typ 2 = GuildVoice
-                        // Erzwinge die Dekodierung direkt aus dem rohen Bytestream als echtes UTF-8
-                        let rawName = Buffer.from(ch.name, 'utf8').toString('utf8');
-                        let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                    if (ch.type === 2) {
+                        // Gib den Namen als rohen Hex-Buffer im Terminal aus
+                        const nameBuffer = Buffer.from(ch.name, 'utf8');
+                        console.log(`🔍 [CHANNEL RAW DEBUG] Name: "${ch.name}" | Hex: ${nameBuffer.toString('hex')}`);
+
+                        let cleanName = ch.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
                         await pool.query(
                             `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
@@ -44,6 +51,8 @@ class CommandManager {
                         count++;
                     }
                 }
+                await interaction.editReply(`✅ **${count}** Kanäle im Debug-Modus analysiert! Prüfe die Logs.`);
+            }
                 console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt über REST-API (Raw Buffer) gespeichert.`);
                 await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich über die REST-API gespeichert!`);
             }
