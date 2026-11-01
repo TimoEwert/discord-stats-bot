@@ -23,44 +23,41 @@ class CommandManager {
         console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
 
         try {
-            // Befehl zum Speichern der aktuellen Kanal-Referenzen via Base64-Transport
+            // Befehl zum Speichern der aktuellen Sprachkanal-Namen direkt aus dem Bot-Cache
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
-                const response = await fetch(`https://discord.com/api/v10/guilds/${interaction.guildId}/channels`, {
-                    headers: {
-                        Authorization: `Bot ${interaction.client.token}`
-                    }
-                });
-                const rawChannels = await response.json();
+                // Erzwinge UTF-8 Client-Encoding für die Session
+                await pool.query("SET client_encoding = 'UTF8'");
+
+                const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
 
-                for (const ch of rawChannels) {
-                    if (ch.type === 2) {
-                        // 1. Normalisieren und Bereinigen
-                        let cleanName = ch.name.normalize('NFC').replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
-                        
-                        // 2. In Base64 umwandeln, um den Transportweg absolut fehlerfrei zu machen
-                        let base64Name = Buffer.from(cleanName, 'utf8').toString('base64');
+                for (const [_, channel] of channels) {
+                    // Nutze den Live-Cache des Bots, da dieser die Unicode-Zeichen vor dem API-Filter im RAM behält
+                    let rawName = channel.name.normalize('NFC');
+                    let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
-                        // 3. Über Base64 in die DB schreiben und direkt in Postgres zu UTF-8 decodieren
-                        await pool.query(
-                            `INSERT INTO channel_references (channel_id, original_name) 
-                             VALUES ($1, CONVERT_FROM(DECODE($2, 'base64'), 'UTF8')) 
-                             ON CONFLICT (channel_id) 
-                             DO UPDATE SET original_name = CONVERT_FROM(DECODE($2, 'base64'), 'UTF8')`,
-                            [ch.id, base64Name]
-                        );
-                        count++;
-                    }
+                    // Base64-Transport als absolute Absicherung gegen Treiber-Konvertierungsfehler
+                    let base64Name = Buffer.from(cleanName, 'utf8').toString('base64');
+
+                    await pool.query(
+                        `INSERT INTO channel_references (channel_id, original_name) 
+                         VALUES ($1, CONVERT_FROM(DECODE($2, 'base64'), 'UTF8')) 
+                         ON CONFLICT (channel_id) 
+                         DO UPDATE SET original_name = CONVERT_FROM(DECODE($2, 'base64'), 'UTF8')`,
+                        [channel.id, base64Name]
+                    );
+                    count++;
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen sicher via Base64 übertragen und gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich über Base64 gespeichert!`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen sicher aus dem Bot-Cache gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich aus dem Bot-Cache gespeichert!`);
             }
             // Befehl zum Zurücksetzen der Sprachkanäle
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
+                await pool.query("SET client_encoding = 'UTF8'");
                 const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
                 console.log(`🔍 [DB QUERY] Gefundene Kanal-Referenzen in DB: ${result.rows.length}`);
 
