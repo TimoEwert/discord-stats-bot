@@ -53,9 +53,6 @@ class CommandManager {
                 }
                 await interaction.editReply(`✅ **${count}** Kanäle im Debug-Modus analysiert! Prüfe die Logs.`);
             }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt über REST-API (Raw Buffer) gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich über die REST-API gespeichert!`);
-            }
             // Befehl zum Zurücksetzen der Sprachkanäle auf die gespeicherten Originalnamen
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
