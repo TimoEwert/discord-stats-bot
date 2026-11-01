@@ -1,4 +1,4 @@
-// index.js - Version 5.2 (Senior Programming Partner - Perfektionierter Switch- und Join-Nickname-Alarm)
+// index.js - Version 5.3 (Senior Programming Partner - Korrigierter Switch-Trigger)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -114,7 +114,7 @@ client.once('clientReady', async () => {
     }, 30000);
 });
 
-// Event: Voice State Update mit präziser Zuordnung für Joins, Leaves und Switches
+// Event: Voice State Update mit aktivierten Funktionen bei Channel-Switch
 client.on('voiceStateUpdate', async (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
@@ -131,15 +131,12 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         console.log(`🎙️ [VOICE JOIN] ${displayName} hat Kanal ID ${newState.channelId} betreten.`);
         activeVoiceSessions.set(userId, new Date());
         
-        // Nickname für 10s auf ⚠️⚠️⚠️UserXY setzen
         await triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
     } 
     else if (justLeftVoice) {
         console.log(`🎙️ [VOICE LEAVE] ${displayName} hat Kanal ID ${oldState.channelId} verlassen.`);
         
         await saveAndClearSession(userId, username);
-
-        // Kanalname für 10s auf 🔴UserXY ging setzen
         await triggerChannelLeaveAlert(oldState.channel, `🔴${displayName} ging`);
     } 
     else if (switchedVoice) {
@@ -147,9 +144,8 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         
         await saveAndClearSession(userId, username);
 
-        // 1. Alten Kanal als "ging" markieren
+        // HIER WAR DER FEHLER: Bisher fehlten diese beiden Zeilen beim Switch!
         await triggerChannelLeaveAlert(oldState.channel, `🔴${displayName} ging`);
-        // 2. Nickname beim Wechsel ebenfalls zwingend für 10s auf ⚠️⚠️⚠️ aufleuchten lassen
         await triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
     }
 });
@@ -304,7 +300,7 @@ async function getOriginalChannelName(channelId) {
     return "Voice Channel";
 }
 
-// 1. Nickname-Alarm (Beim Betreten / Wechseln) für 10 Sekunden
+// 1. Nickname-Alarm für 10 Sekunden
 async function triggerNicknameAlert(member, alertName) {
     try {
         if (activeNicknameResets.has(member.id)) {
@@ -331,7 +327,7 @@ async function triggerNicknameAlert(member, alertName) {
     }
 }
 
-// 2. Kanal-Leave-Alarm (Beim Verlassen / Wechseln) für 10 Sekunden
+// 2. Kanal-Leave-Alarm für 10 Sekunden
 async function triggerChannelLeaveAlert(channel, alertChannelName) {
     if (!channel) return;
 
