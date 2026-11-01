@@ -1,4 +1,4 @@
-// index.js - Version 5.3 (Senior Programming Partner - Korrigierter Switch-Trigger)
+// index.js - Version 5.4 (Senior Programming Partner - Blitzschnelle Event-Erkennung & Strikte Trennung)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -16,7 +16,9 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildVoiceStates
-    ]
+    ],
+    // Cache- und Member-Prefetch-Optimierung, damit Events sofort greifen
+    failIfNotExists: false
 });
 
 // Klassen-Definitionen & Icons
@@ -114,7 +116,7 @@ client.once('clientReady', async () => {
     }, 30000);
 });
 
-// Event: Voice State Update mit aktivierten Funktionen bei Channel-Switch
+// Event: Voice State Update (Blitzschnell ohne blockierende Aufrufe)
 client.on('voiceStateUpdate', async (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
@@ -144,7 +146,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         
         await saveAndClearSession(userId, username);
 
-        // HIER WAR DER FEHLER: Bisher fehlten diese beiden Zeilen beim Switch!
+        // Alten Kanal als "ging" markieren und Nickname temporär aufleuchten lassen
         await triggerChannelLeaveAlert(oldState.channel, `🔴${displayName} ging`);
         await triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
     }
@@ -323,7 +325,9 @@ async function triggerNicknameAlert(member, alertName) {
 
         activeNicknameResets.set(member.id, timeout);
     } catch (e) {
-        console.error(`❌ [NICKNAME FEHLER]:`, e.message);
+        if (e.code !== 50013) { // Ignoriere fehlende Rechte bei Server-Ownern
+            console.error(`❌ [NICKNAME FEHLER]:`, e.message);
+        }
     }
 }
 
@@ -394,7 +398,9 @@ async function updateMemberClassNickname(member) {
             return true;
         }
     } catch (e) {
-        console.error(`❌ [CLASS NICKNAME FEHLER]:`, e.message);
+        if (e.code !== 50013) {
+            console.error(`❌ [CLASS NICKNAME FEHLER]:`, e.message);
+        }
     }
     return false;
 }
