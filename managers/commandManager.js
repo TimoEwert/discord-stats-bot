@@ -28,7 +28,9 @@ class CommandManager {
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
+                    // Entferne nur aktive Warn-Präfixe wie 🔴 oder ⚠️, behalte aber die Channel-Emojis (💬, 🍻 etc.) bei!
                     let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                    
                     await pool.query(
                         `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
                         [channel.id, cleanName || "Voice Channel"]
