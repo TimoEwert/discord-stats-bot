@@ -21,13 +21,15 @@ class CommandManager {
     async handleInteraction(interaction, client) {
         if (!interaction.isChatInputCommand()) return;
 
+        // DEBUG-LOG: Zeigt sofort in Railway an, welcher Befehl getriggert wurde!
+        console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
+
         try {
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
-                    // Säubere den Namen von jeglichen alten Alerts vor dem Speichern
                     let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
                     await pool.query(
                         `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
@@ -50,7 +52,7 @@ class CommandManager {
                     if (channel && channel.isVoiceBased()) {
                         await channel.setName(row.original_name);
                         resetCount++;
-                        await new Promise(r => setTimeout(r, 300)); // Kurze Pause gegen Rate-Limits
+                        await new Promise(r => setTimeout(r, 300));
                     }
                 }
                 await interaction.editReply(`✅ **${resetCount}** Sprachkanäle wurden manuell auf ihre Original-Referenzen zurückgesetzt!`);
