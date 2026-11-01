@@ -32,7 +32,14 @@ class VisualManager {
                 activeChannelResets.delete(oldChannel.id);
             }
 
-            const alertName = `🔴${member.user.username} ging`.substring(0, 32);
+            // Serverspezifischen Display Name holen, bereinigen und für den Alert-Namen nutzen
+            let displayName = member ? (member.displayName || member.user.username) : "User";
+            displayName = displayName
+                .replace(/^[🔴⚠️.]+/g, '')
+                .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
+                .trim();
+
+            const alertName = `🔴${displayName} ging`.substring(0, 32);
             
             // 3. Kanal auf den 'ging'-Status setzen
             await oldChannel.setName(alertName);
