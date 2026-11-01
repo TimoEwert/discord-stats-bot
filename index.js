@@ -1,4 +1,4 @@
-// index.js - Version 3.2 (Senior Programming Partner - Komplettversion)
+// index.js - Version 3.4 (Senior Programming Partner - Komplettversion)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -80,17 +80,17 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     
     const justJoinedVoice = !oldState.channelId && newState.channelId;
     const justLeftVoice = oldState.channelId && !newState.channelId;
+    const switchedVoice = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
 
+    // 1. Fall: User betritt ganz frisch einen Voice-Channel
     if (justJoinedVoice) {
         activeVoiceSessions.set(userId, new Date());
         
-        // Kanalname temporär anpassen
         await triggerChannelVisual(newState.channel, `🟢 ${displayName} betritt`);
-
-        // Klassen/Nicknamen im Hintergrund aktualisieren
         await updateMemberNickname(member);
-
-    } else if (justLeftVoice) {
+    } 
+    // 2. Fall: User verlässt den Voice-Channel komplett
+    else if (justLeftVoice) {
         const joinTime = activeVoiceSessions.get(userId);
         if (joinTime) {
             const leaveTime = new Date();
@@ -107,8 +107,37 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             activeVoiceSessions.delete(userId);
         }
 
-        // Kanalname temporär anpassen
         await triggerChannelVisual(oldState.channel, `🔴 ${displayName} verlässt`);
+    } 
+    // 3. Fall: User wechselt zwischen zwei Kanälen hin und her
+    else if (switchedVoice) {
+        const joinTime = activeVoiceSessions.get(userId);
+        const leaveTime = new Date();
+
+        // Alte Session für den bisherigen Kanal abschließen und speichern
+        if (joinTime) {
+            const durationSeconds = Math.floor((leaveTime - joinTime) / 1000);
+            if (durationSeconds > 0) {
+                try {
+                    await pool.query(
+                        `INSERT INTO voice_sessions (user_id, username, joined_at, left_at, duration_seconds) VALUES ($1, $2, $3, $4, $5)`,
+                        [userId, username, joinTime, leaveTime, durationSeconds]
+                    );
+                } catch (err) {
+                    console.error('❌ Fehler beim Speichern der Voice-Session (Switch):', err);
+                }
+            }
+        }
+
+        // Neue Session für den Zielkanal starten
+        activeVoiceSessions.set(userId, leaveTime);
+
+        // Visualisierung sowohl im alten Kanal (Verlassen) als auch im neuen Kanal (Betreten)
+        await triggerChannelVisual(oldState.channel, `🔴 ${displayName} verlässt`);
+        await triggerChannelVisual(newState.channel, `🔄 ${displayName} wechselt`);
+
+        // Klassen/Nicknamen im Hintergrund aktualisieren
+        await updateMemberNickname(member);
     }
 });
 
@@ -207,12 +236,10 @@ async function triggerChannelVisual(channel, temporaryName) {
     if (!channel) return;
 
     try {
-        // Wenn bereits ein Timer läuft, diesen löschen
         if (channelTimers.has(channel.id)) {
             clearTimeout(channelTimers.get(channel.id).timeout);
         } else {
-            // Nur den echten Namen sichern, wenn der Kanal gerade nicht im Animations-Modus ist
-            if (!channel.name.startsWith('🟢') && !channel.name.startsWith('🔴')) {
+            if (!channel.name.startsWith('🟢') && !channel.name.startsWith('🔴') && !channel.name.startsWith('🔄')) {
                 channelTimers.set(channel.id, {
                     originalName: channel.name,
                     timeout: null
@@ -223,10 +250,8 @@ async function triggerChannelVisual(channel, temporaryName) {
         const channelData = channelTimers.get(channel.id);
         if (!channelData) return;
 
-        // Kanalnamen auf temporären Status setzen
         await channel.setName(temporaryName);
 
-        // Timer für 10 Sekunden starten
         const timeout = setTimeout(async () => {
             try {
                 await channel.setName(channelData.originalName);
@@ -240,7 +265,6 @@ async function triggerChannelVisual(channel, temporaryName) {
         channelData.timeout = timeout;
 
     } catch (err) {
-        // Hier sehen wir jetzt sofort in den Logs, ob Discord wegen Rate-Limits blockiert (Status 429)
         console.error(`❌ Discord API Fehler beim Ändern des Kanalnamens (Code ${err.status || 'unbekannt'}):`, err.message);
     }
 }
