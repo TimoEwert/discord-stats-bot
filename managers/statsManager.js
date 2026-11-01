@@ -10,16 +10,9 @@ class StatsManager {
     async handleJoin(member) {
         if (!member || member.user.bot) return;
 
-        // Serverspezifischen Display Name holen und bereinigen
-        let displayName = member.displayName || member.user.username;
-        displayName = displayName
-            .replace(/^[🔴⚠️.]+/g, '')
-            .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
-            .trim();
-
+        // Wir merken uns nur noch den exakten Startzeitpunkt zur User-ID
         activeVoiceSessions.set(member.id, {
-            joinedAt: new Date(),
-            username: displayName // Bereinigter Server-Nick für die DB
+            joinedAt: new Date()
         });
     }
 
@@ -30,16 +23,16 @@ class StatsManager {
 
         const leaveTime = new Date();
         const durationSeconds = Math.floor((leaveTime - session.joinedAt) / 1000);
-        const durationMinutes = Math.max(1, Math.floor(durationSeconds / 60)); // Minutengenaue Abrechnung (mind. 1 Minute bei Test)
+        const durationMinutes = Math.max(1, Math.floor(durationSeconds / 60)); // Minutengenaue Abrechnung (mind. 1 Minute)
 
         if (durationSeconds > 10) { // Ignoriere ultra-kurze Micro-Joins unter 10 Sek.
             try {
-                // Tabelle auf Minuten-Abrechnung ausgelegt
+                // Speicherung erfolgt nun strikt über die unveränderliche User-ID
                 await pool.query(
-                    `INSERT INTO voice_sessions (user_id, username, joined_at, left_at, duration_seconds, duration_minutes) VALUES ($1, $2, $3, $4, $5, $6)`,
-                    [member.id, session.username, session.joinedAt, leaveTime, durationSeconds, durationMinutes]
+                    `INSERT INTO voice_sessions (user_id, joined_at, left_at, duration_seconds, duration_minutes) VALUES ($1, $2, $3, $4, $5)`,
+                    [member.id, session.joinedAt, leaveTime, durationSeconds, durationMinutes]
                 );
-                console.log(`📊 [STATS] Voice-Session für ${session.username} gespeichert: ${durationMinutes} Minuten.`);
+                console.log(`📊 [STATS] Voice-Session für User-ID ${member.id} gespeichert: ${durationMinutes} Minuten.`);
             } catch (err) {
                 console.error('❌ [STATS ERROR] Fehler beim Speichern der Session:', err);
             }
