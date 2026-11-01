@@ -2,10 +2,13 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+const { Pool } = require('pg');
+require('dotenv').config();
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
-    // Erzwinge UTF-8 für Emojis und Sonderzeichen
+    // Zwingt die Verbindung zu UTF-8 für saubere Emojis
     options: '-c client_encoding=UTF8'
 });
 
