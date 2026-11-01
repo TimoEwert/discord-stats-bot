@@ -11,7 +11,6 @@ class NicknameManager {
         this.name = "NicknameManager";
     }
 
-    // Lauscht auf Voice-Events und kümmert sich komplett eigenständig um den Nickname-Alarm
     async handleVoiceStateUpdate(oldState, newState) {
         const member = newState.member || oldState.member;
         if (!member || member.user.bot) return;
@@ -20,14 +19,16 @@ class NicknameManager {
         const switched = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
 
         if (justJoined || switched) {
-            const displayName = member.displayName;
-            await this.triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
+            // Säubere den Clean-Namen (entferne alte Warn-Icons falls vorhanden)
+            let rawName = member.user.username;
+            await this.triggerNicknameAlert(member, `⚠️⚠️⚠️${rawName}`);
         }
     }
 
     async triggerNicknameAlert(member, alertName) {
         if (!member) return;
         try {
+            // Harten Stopp für bestehende Timer dieses Users, damit sich nichts aufschaukelt!
             if (activeNicknameResets.has(member.id)) {
                 clearTimeout(activeNicknameResets.get(member.id));
                 activeNicknameResets.delete(member.id);
