@@ -23,23 +23,26 @@ class CommandManager {
         console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
 
         try {
+            // Befehl zum Speichern der aktuellen Sprachkanal-Namen als Referenz in der Datenbank
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
-                    // Bereinigung durchführen, aber den Original-String direkt als UTF-8-Buffer an die DB übergeben
+                    // Bereinigt Präfixe wie rote Punkte oder Status-Endings aus dem Kanalnamen
                     let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
+                    // Übergibt den bereinigten Namen direkt als UTF-8-String an die PostgreSQL-Datenbank
                     await pool.query(
-                        `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, CONVERT_TO($2, 'UTF8')) ON CONFLICT (channel_id) DO UPDATE SET original_name = CONVERT_TO(EXCLUDED.original_name, 'UTF8')`,
+                        `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
                         [channel.id, cleanName || "Voice Channel"]
                     );
                     count++;
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt als UTF-8-Bytes in DB gespeichert.`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen erfolgreich in DB gespeichert.`);
                 await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich gespeichert!`);
             }
+            // Befehl zum Zurücksetzen der Sprachkanäle auf die gespeicherten Originalnamen
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
@@ -69,6 +72,7 @@ class CommandManager {
                 }
                 await interaction.editReply(`✅ **${resetCount}** von ${result.rows.length} Sprachkanälen wurden zurückgesetzt!`);
             }
+            // Befehl zur Anzeige des Voice-Rankings
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
                 
@@ -107,6 +111,7 @@ class CommandManager {
                 }
                 await interaction.editReply({ embeds: [embed] });
             }
+            // Befehl zur Anzeige der wöchentlichen/allgemeinen Stammzeiten
             else if (interaction.commandName === 'wochen_stats') {
                 await interaction.deferReply();
                 
@@ -143,6 +148,7 @@ class CommandManager {
                 }
                 await interaction.editReply({ embeds: [embed] });
             }
+            // Befehl zur Synchronisation der Klassen-Nicknames
             else if (interaction.commandName === 'sync_nicknames') {
                 await interaction.deferReply({ flags: [64] });
                 const members = await interaction.guild.members.fetch();
