@@ -19,16 +19,15 @@ class NicknameManager {
         const switched = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
 
         if (justJoined || switched) {
-            // Säubere den Clean-Namen (entferne alte Warn-Icons falls vorhanden)
-            let rawName = member.user.username;
-            await this.triggerNicknameAlert(member, `⚠️⚠️⚠️${rawName}`);
+            // Nutze den aktuellen DisplayName für den 10-Sekunden-Warn-Alert
+            const currentDisplay = member.displayName.replace(/^[🔴⚠️]+/, '').trim();
+            await this.triggerNicknameAlert(member, `⚠️⚠️⚠️${currentDisplay}`);
         }
     }
 
     async triggerNicknameAlert(member, alertName) {
         if (!member) return;
         try {
-            // Harten Stopp für bestehende Timer dieses Users, damit sich nichts aufschaukelt!
             if (activeNicknameResets.has(member.id)) {
                 clearTimeout(activeNicknameResets.get(member.id));
                 activeNicknameResets.delete(member.id);
@@ -61,23 +60,28 @@ class NicknameManager {
     async updateMemberNickname(member, client) {
         if (member.id === member.guild.ownerId || member.id === client.user.id) return false;
         try {
+            // Finde alle Icons, die zu den Rollen des Mitglieds passen
             const userIcons = member.roles.cache
                 .filter(role => CLASS_ICONS[role.name])
                 .map(role => CLASS_ICONS[role.name]);
 
+            // Basis ist der echte Benutzername (username), damit keine doppelten Icons entstehen
             let cleanName = member.user.username;
             let newName = cleanName;
+
             if (userIcons.length > 0) {
                 newName = `${cleanName} | ${userIcons.join('')}`.substring(0, 32);
             }
 
+            // Setze den Nicknamen nur, wenn er sich vom aktuellen unterscheidet
             if (member.displayName !== newName) {
                 await member.setNickname(newName);
+                console.log(`✅ [NICKNAME SYNC] ${member.user.tag} aktualisiert auf: ${newName}`);
                 return true;
             }
         } catch (e) {
             if (e.code !== 50013) {
-                console.error(`❌ [CLASS NICKNAME ERROR]:`, e.message);
+                console.error(`❌ [CLASS NICKNAME ERROR] Konnte Nickname für ${member.user.tag} nicht setzen:`, e.message);
             }
         }
         return false;
