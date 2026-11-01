@@ -23,14 +23,10 @@ class CommandManager {
         console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
 
         try {
-            // Befehl zum Speichern der aktuellen Sprachkanal-Namen als Referenz in der Datenbank
+            // Befehl zum Speichern der aktuellen Kanal-Referenzen via Base64-Transport
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
-                // 🛠️ FIX: Erzwinge striktes UTF-8 für die aktuelle DB-Sitzung, 
-                // damit der Treiber 4-Byte-Emojis (inkl. Variation Selectors) nicht beschädigt.
-                await pool.query("SET client_encoding = 'UTF8'");
-
                 const response = await fetch(`https://discord.com/api/v10/guilds/${interaction.guildId}/channels`, {
                     headers: {
                         Authorization: `Bot ${interaction.client.token}`
@@ -41,27 +37,30 @@ class CommandManager {
 
                 for (const ch of rawChannels) {
                     if (ch.type === 2) {
-                        // Unicode-Normalisierung und Bereinigung von Präfixen
-                        let rawName = ch.name.normalize('NFC');
-                        let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                        // 1. Normalisieren und Bereinigen
+                        let cleanName = ch.name.normalize('NFC').replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                        
+                        // 2. In Base64 umwandeln, um den Transportweg absolut fehlerfrei zu machen
+                        let base64Name = Buffer.from(cleanName, 'utf8').toString('base64');
 
+                        // 3. Über Base64 in die DB schreiben und direkt in Postgres zu UTF-8 decodieren
                         await pool.query(
-                            `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
-                            [ch.id, cleanName || "Voice Channel"]
+                            `INSERT INTO channel_references (channel_id, original_name) 
+                             VALUES ($1, CONVERT_FROM(DECODE($2, 'base64'), 'UTF8')) 
+                             ON CONFLICT (channel_id) 
+                             DO UPDATE SET original_name = CONVERT_FROM(DECODE($2, 'base64'), 'UTF8')`,
+                            [ch.id, base64Name]
                         );
                         count++;
                     }
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen mit erzwunfenem UTF-8-Client gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich und fehlerfrei gespeichert!`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen sicher via Base64 übertragen und gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich über Base64 gespeichert!`);
             }
-            // Befehl zum Zurücksetzen der Sprachkanäle auf die gespeicherten Originalnamen
+            // Befehl zum Zurücksetzen der Sprachkanäle
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
-                // Auch beim Auslesen sauberes UTF-8 erzwingen
-                await pool.query("SET client_encoding = 'UTF8'");
-
                 const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
                 console.log(`🔍 [DB QUERY] Gefundene Kanal-Referenzen in DB: ${result.rows.length}`);
 
