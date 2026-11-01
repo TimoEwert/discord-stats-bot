@@ -35,7 +35,7 @@ class CommandManager {
 
                 // Bekannte Problem-Kanäle, bei denen Discord den Bytestream für Bots beschädigt, 
                 // direkt als sauberes Unicode hinterlegen (der Rest läuft dynamisch).
-               const manualOverrides = {
+                const manualOverrides = {
                     "1558396597702889522": "👑 | Lead Meeting",
                     "1558396122580390019": "💤 | AFK",
                     "1558398389866078319": "👥| Recruiting",
@@ -99,11 +99,11 @@ class CommandManager {
                 }
                 await interaction.editReply(`✅ **${resetCount}** von ${result.rows.length} Sprachkanälen wurden zurückgesetzt!`);
             }
-            // Befehl zur Anzeige des Voice-Rankings
+            // Befehl zur Anzeige des Voice-Rankings (Gruppierung strikt über user_id)
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
                 
-                const result = await pool.query(`SELECT user_id, username, SUM(duration_minutes) as total_minutes FROM voice_sessions GROUP BY user_id, username ORDER BY total_minutes DESC LIMIT 10`);
+                const result = await pool.query(`SELECT user_id, SUM(duration_minutes) as total_minutes FROM voice_sessions GROUP BY user_id ORDER BY total_minutes DESC LIMIT 10`);
                 const embed = new EmbedBuilder().setColor(0x00AE86).setTitle('🏆 ARIES COMMUNITY - VOICE RANKING').setTimestamp();
                 
                 if (result.rows.length === 0) {
@@ -113,7 +113,7 @@ class CommandManager {
                     for (let i = 0; i < result.rows.length; i++) {
                         const row = result.rows[i];
                         
-                        let displayName = row.username;
+                        let displayName = `Unbekannter User (${row.user_id})`;
                         try {
                             const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
                             if (member) {
@@ -138,11 +138,11 @@ class CommandManager {
                 }
                 await interaction.editReply({ embeds: [embed] });
             }
-            // Befehl zur Anzeige der wöchentlichen/allgemeinen Stammzeiten
+            // Befehl zur Anzeige der wöchentlichen/allgemeinen Stammzeiten (Gruppierung strikt über user_id)
             else if (interaction.commandName === 'wochen_stats') {
                 await interaction.deferReply();
                 
-                const result = await pool.query(`SELECT user_id, username, SUM(duration_minutes) as total_minutes, COUNT(id) as sessions_count FROM voice_sessions GROUP BY user_id, username ORDER BY total_minutes DESC LIMIT 15`);
+                const result = await pool.query(`SELECT user_id, SUM(duration_minutes) as total_minutes, COUNT(id) as sessions_count FROM voice_sessions GROUP BY user_id ORDER BY total_minutes DESC LIMIT 15`);
                 const embed = new EmbedBuilder()
                     .setColor(0x3498DB)
                     .setTitle('📊 COMMUNITY STAMMZEITEN (Gesamtübersicht)')
@@ -155,7 +155,7 @@ class CommandManager {
                     for (let i = 0; i < result.rows.length; i++) {
                         const row = result.rows[i];
                         
-                        let displayName = row.username;
+                        let displayName = `Unbekannter User (${row.user_id})`;
                         try {
                             const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
                             if (member) {
