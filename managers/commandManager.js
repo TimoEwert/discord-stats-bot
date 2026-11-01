@@ -28,8 +28,9 @@ class CommandManager {
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
-                    // Erzwinge die Konvertierung des Kanalnamens über Buffer zu echtem UTF-8
-                    let rawName = Buffer.from(channel.name, 'utf8').toString('utf8');
+                    // Robuste Bytestring-Konvertierung: Extrahiert die echten Rohdaten als Buffer und erzwingt UTF-8
+                    const rawBuffer = Buffer.from(channel.name, 'binary');
+                    let rawName = rawBuffer.toString('utf8');
                     let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
                     await pool.query(
