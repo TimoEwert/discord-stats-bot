@@ -1,4 +1,4 @@
-// index.js - Version 5.4 (Senior Programming Partner - Blitzschnelle Event-Erkennung & Strikte Trennung)
+// index.js - Version 5.5 (Senior Programming Partner - Erzwungene Sofort-Erkennung bei Channel-Switch)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -17,7 +17,6 @@ const client = new Client({
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildVoiceStates
     ],
-    // Cache- und Member-Prefetch-Optimierung, damit Events sofort greifen
     failIfNotExists: false
 });
 
@@ -116,7 +115,7 @@ client.once('clientReady', async () => {
     }, 30000);
 });
 
-// Event: Voice State Update (Blitzschnell ohne blockierende Aufrufe)
+// Event: Voice State Update (Erzwungene direkte Ausführung ohne Cache-Verzögerung)
 client.on('voiceStateUpdate', async (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
@@ -146,9 +145,11 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         
         await saveAndClearSession(userId, username);
 
-        // Alten Kanal als "ging" markieren und Nickname temporär aufleuchten lassen
-        await triggerChannelLeaveAlert(oldState.channel, `🔴${displayName} ging`);
-        await triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
+        // Sofortige parallele Ausführung für alten Kanal & Nickname ohne Verzögerung
+        await Promise.all([
+            triggerChannelLeaveAlert(oldState.channel, `🔴${displayName} ging`),
+            triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`)
+        ]);
     }
 });
 
@@ -307,6 +308,7 @@ async function triggerNicknameAlert(member, alertName) {
     try {
         if (activeNicknameResets.has(member.id)) {
             clearTimeout(activeNicknameResets.get(member.id));
+            activeNicknameResets.delete(member.id);
         }
 
         await member.setNickname(alertName.substring(0, 32));
@@ -325,7 +327,7 @@ async function triggerNicknameAlert(member, alertName) {
 
         activeNicknameResets.set(member.id, timeout);
     } catch (e) {
-        if (e.code !== 50013) { // Ignoriere fehlende Rechte bei Server-Ownern
+        if (e.code !== 50013) {
             console.error(`❌ [NICKNAME FEHLER]:`, e.message);
         }
     }
@@ -338,6 +340,7 @@ async function triggerChannelLeaveAlert(channel, alertChannelName) {
     try {
         if (activeChannelResets.has(channel.id)) {
             clearTimeout(activeChannelResets.get(channel.id));
+            activeChannelResets.delete(channel.id);
         }
 
         const originalName = await getOriginalChannelName(channel.id);
