@@ -35,14 +35,11 @@ class CommandManager {
 
                 // Bekannte Problem-Kanäle, bei denen Discord den Bytestream für Bots beschädigt, 
                 // direkt als sauberes Unicode hinterlegen (der Rest läuft dynamisch).
-                const manualOverrides = {
+               const manualOverrides = {
                     "1558396597702889522": "👑 | Lead Meeting",
                     "1558396122580390019": "💤 | AFK",
-                    "1558398389866078319": "👥 | Recruiting",
-                    "1558384720411365407": "🗨️ | Community Hangout",
-                    // Trage hier bei Bedarf Kanal-IDs als Fallback ein, falls Discord sie beschädigt:
-                    // "1558396597702889522": "🎧︱Cyrills Playlist",
-                    // "1558396122580390019": "🗨️| Community Hangout"
+                    "1558398389866078319": "👥| Recruiting",
+                    "1558384720411365407": "🗨️| Community Hangout"
                 };
 
                 for (const [_, channel] of channels) {
