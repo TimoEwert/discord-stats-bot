@@ -29,17 +29,19 @@ class CommandManager {
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
-                    // Bereinigt Präfixe wie rote Punkte oder Status-Endings aus dem Kanalnamen
-                    let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+                    // Umgeht den beschädigten Bot-Cache und lädt den Kanal direkt frisch von der Discord-API
+                    const freshChannel = await interaction.guild.channels.fetch(channel.id, { force: true }).catch(() => channel);
+                    let rawName = freshChannel ? freshChannel.name : channel.name;
+                    
+                    let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
-                    // Übergibt den bereinigten Namen direkt als UTF-8-String an die PostgreSQL-Datenbank
                     await pool.query(
                         `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
                         [channel.id, cleanName || "Voice Channel"]
                     );
                     count++;
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen erfolgreich in DB gespeichert.`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt via API-Fetch in DB gespeichert.`);
                 await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich gespeichert!`);
             }
             // Befehl zum Zurücksetzen der Sprachkanäle auf die gespeicherten Originalnamen
@@ -151,30 +153,4 @@ class CommandManager {
             // Befehl zur Synchronisation der Klassen-Nicknames
             else if (interaction.commandName === 'sync_nicknames') {
                 await interaction.deferReply({ flags: [64] });
-                const members = await interaction.guild.members.fetch();
-                let updatedCount = 0;
-                
-                const nicknameManager = require('./nicknameManager');
-
-                for (const [_, member] of members) {
-                    if (member.user.bot) continue;
-                    const changed = await nicknameManager.updateMemberNickname(member, false);
-                    if (changed) {
-                        updatedCount++;
-                        await new Promise(r => setTimeout(r, 100));
-                    }
-                }
-                await interaction.editReply(`✅ Nicknames für **${updatedCount}** Mitglieder synchronisiert.`);
-            }
-        } catch (e) {
-            console.error("❌ [COMMAND ERROR]:", e);
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply(`❌ Ein Fehler ist aufgetreten: ${e.message}`).catch(() => {});
-            } else {
-                await interaction.reply({ content: `❌ Ein Fehler ist aufgetreten: ${e.message}`, flags: [64] }).catch(() => {});
-            }
-        }
-    }
-}
-
-module.exports = new CommandManager();
+                const members = await
