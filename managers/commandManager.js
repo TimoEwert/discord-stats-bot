@@ -25,23 +25,20 @@ class CommandManager {
         try {
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
-                
-                // Hole alle Voice-Kanäle direkt frisch von der Discord-API, um Cache-Fehler zu umgehen
-                const fetchedChannels = await interaction.guild.channels.fetch();
-                const voiceChannels = fetchedChannels.filter(c => c && c.isVoiceBased());
-                
+                const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
-                for (const [_, channel] of voiceChannels) {
+                for (const [_, channel] of channels) {
+                    // Bereinigung durchführen, aber den Original-String direkt als UTF-8-Buffer an die DB übergeben
                     let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
                     await pool.query(
-                        `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
+                        `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, CONVERT_TO($2, 'UTF8')) ON CONFLICT (channel_id) DO UPDATE SET original_name = CONVERT_TO(EXCLUDED.original_name, 'UTF8')`,
                         [channel.id, cleanName || "Voice Channel"]
                     );
                     count++;
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt über API in DB gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich über die API gespeichert!`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt als UTF-8-Bytes in DB gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich gespeichert!`);
             }
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
