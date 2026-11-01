@@ -26,23 +26,26 @@ class CommandManager {
             // Befehl zum Speichern der aktuellen Sprachkanal-Namen als Referenz in der Datenbank
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
-                const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
+                
+                // Holt die rohen Kanal-Daten direkt über die Discord-REST-API ab, um jegliche Discord.js-Cache/Parser-Fehler zu umgehen
+                const rawChannels = await interaction.client.rest.get(`/guilds/${interaction.guildId}/channels`);
                 let count = 0;
-                for (const [_, channel] of channels) {
-                    // Umgeht den Bot-Cache und lädt den Kanal direkt frisch von der Discord-API
-                    const freshChannel = await interaction.guild.channels.fetch(channel.id, { force: true }).catch(() => channel);
-                    let rawName = freshChannel ? freshChannel.name : channel.name;
-                    
-                    let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
-                    await pool.query(
-                        `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
-                        [channel.id, cleanName || "Voice Channel"]
-                    );
-                    count++;
+                for (const ch of rawChannels) {
+                    if (ch.type === 2) { // Typ 2 = GuildVoice
+                        // Erzwinge die Dekodierung direkt aus dem rohen Bytestream als echtes UTF-8
+                        let rawName = Buffer.from(ch.name, 'utf8').toString('utf8');
+                        let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
+
+                        await pool.query(
+                            `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
+                            [ch.id, cleanName || "Voice Channel"]
+                        );
+                        count++;
+                    }
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt via API-Fetch in DB gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich gespeichert!`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen direkt über REST-API (Raw Buffer) gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich über die REST-API gespeichert!`);
             }
             // Befehl zum Zurücksetzen der Sprachkanäle auf die gespeicherten Originalnamen
             else if (interaction.commandName === 'reset_channel_refs') {
