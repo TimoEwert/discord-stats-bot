@@ -1,4 +1,4 @@
-// index.js - Version 5.5 (Senior Programming Partner - Erzwungene Sofort-Erkennung bei Channel-Switch)
+// index.js - Version 6.0 (Senior Programming Partner - Reiner Leave-Channel-Alert, Nicknames unangetastet)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -37,9 +37,8 @@ const ALL_ICONS_ARRAY = [...Object.values(CLASS_ICONS), ".⚠️⚠️⚠️", "
 // Map zur temporären Speicherung der Voice-Startzeiten
 const activeVoiceSessions = new Map();
 
-// Maps zur Timer-Verwaltung
+// Map zur Verwaltung der Kanal-Reset-Timer
 const activeChannelResets = new Map();
-const activeNicknameResets = new Map();
 
 process.on('unhandledRejection', error => {
     console.error('⚠️ [FATAL] Unbehandeltes Promise-Rejection abgefangen:', error);
@@ -98,7 +97,7 @@ client.once('clientReady', async () => {
             for (const row of result.rows) {
                 const channel = client.channels.cache.get(row.channel_id);
                 if (channel && channel.isVoiceBased()) {
-                    if (!activeChannelResets.has(row.channel_id) && (channel.name.startsWith('🔴') || channel.name.startsWith('🟢') || channel.name.startsWith('🔄') || channel.name.includes('ging'))) {
+                    if (!activeChannelResets.has(row.channel_id) && (channel.name.startsWith('🔴') || channel.name.includes('ging'))) {
                         console.log(`🛠️ [WATCHDOG] Korrigiere hängengebliebenen Kanal ID ${row.channel_id} ('${channel.name}') -> Referenz: '${row.original_name}'`);
                         try {
                             await channel.setName(row.original_name);
@@ -115,7 +114,7 @@ client.once('clientReady', async () => {
     }, 30000);
 });
 
-// Event: Voice State Update (Erzwungene direkte Ausführung ohne Cache-Verzögerung)
+// Event: Voice State Update (Ausschließlich Leave-Trigger benennt den Kanal um)
 client.on('voiceStateUpdate', async (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
@@ -131,13 +130,14 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     if (justJoinedVoice) {
         console.log(`🎙️ [VOICE JOIN] ${displayName} hat Kanal ID ${newState.channelId} betreten.`);
         activeVoiceSessions.set(userId, new Date());
-        
-        await triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
+        // Keine Channel-Umbenennung beim Join gewünscht
     } 
     else if (justLeftVoice) {
         console.log(`🎙️ [VOICE LEAVE] ${displayName} hat Kanal ID ${oldState.channelId} verlassen.`);
         
         await saveAndClearSession(userId, username);
+
+        // NUR HIER: Kanalname für 10s auf 🔴UserXY ging setzen
         await triggerChannelLeaveAlert(oldState.channel, `🔴${displayName} ging`);
     } 
     else if (switchedVoice) {
@@ -145,11 +145,8 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         
         await saveAndClearSession(userId, username);
 
-        // Sofortige parallele Ausführung für alten Kanal & Nickname ohne Verzögerung
-        await Promise.all([
-            triggerChannelLeaveAlert(oldState.channel, `🔴${displayName} ging`),
-            triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`)
-        ]);
+        // Beim Switch hat er den alten Kanal verlassen -> alten Kanal kurz als "ging" markieren
+        await triggerChannelLeaveAlert(oldState.channel, `🔴${displayName} ging`);
     }
 });
 
@@ -303,37 +300,7 @@ async function getOriginalChannelName(channelId) {
     return "Voice Channel";
 }
 
-// 1. Nickname-Alarm für 10 Sekunden
-async function triggerNicknameAlert(member, alertName) {
-    try {
-        if (activeNicknameResets.has(member.id)) {
-            clearTimeout(activeNicknameResets.get(member.id));
-            activeNicknameResets.delete(member.id);
-        }
-
-        await member.setNickname(alertName.substring(0, 32));
-        console.log(`🏷️ [NICKNAME ALERT] ${member.user.tag} temporär auf '${alertName}' gesetzt.`);
-
-        const timeout = setTimeout(async () => {
-            try {
-                await updateMemberClassNickname(member);
-                console.log(`🏷️ [NICKNAME RESET] ${member.user.tag} auf Klassen-Nickname zurückgesetzt.`);
-            } catch (err) {
-                console.error(`❌ [NICKNAME RESET FEHLER]:`, err.message);
-            } finally {
-                activeNicknameResets.delete(member.id);
-            }
-        }, 10000);
-
-        activeNicknameResets.set(member.id, timeout);
-    } catch (e) {
-        if (e.code !== 50013) {
-            console.error(`❌ [NICKNAME FEHLER]:`, e.message);
-        }
-    }
-}
-
-// 2. Kanal-Leave-Alarm für 10 Sekunden
+// Kanal-Leave-Alarm für exakt 10 Sekunden
 async function triggerChannelLeaveAlert(channel, alertChannelName) {
     if (!channel) return;
 
@@ -368,7 +335,7 @@ async function triggerChannelLeaveAlert(channel, alertChannelName) {
     }
 }
 
-// Normaler Klassen-Nickname (Standard-Zustand)
+// Normaler Klassen-Nickname (wird bei Standard-Events aufgerufen, sofern nötig, bleibt hier aber unangetastet stabil)
 async function updateMemberClassNickname(member) {
     if (member.id === member.guild.ownerId || member.id === client.user.id) return false;
     try {
