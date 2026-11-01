@@ -1,4 +1,4 @@
-// index.js - Die Mutter-Zentrale (Modularer Core)
+// index.js - Die reine Mutter-Zentrale (Modularer Core)
 const { Client, GatewayIntentBits, REST, Routes } = require('discord.js');
 require('dotenv').config();
 const { initDatabase } = require('./database');
@@ -26,7 +26,6 @@ client.once('clientReady', async () => {
     console.log(`✅ [INIT] Bot online als ${client.user.tag}`);
     await initDatabase();
 
-    // Befehle automatisch über den CommandManager registrieren
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         const commands = commandManager.getCommandBuilders();
@@ -37,30 +36,32 @@ client.once('clientReady', async () => {
     }
 });
 
-// Event: Voice State Update leitet sauber an Stats-, Visual- und Nickname-Manager weiter
+// Event: Voice State Update verteilt die Arbeit strikt an die zuständigen Module
 client.on('voiceStateUpdate', (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
-
-    const displayName = member.displayName;
 
     const justJoined = !oldState.channelId && newState.channelId;
     const justLeft = oldState.channelId && !newState.channelId;
     const switched = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
 
+    // 1. Statistiken (DB-Tracking)
     if (justJoined) {
         statsManager.handleJoin(member);
-        nicknameManager.triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
-    } 
-    else if (justLeft) {
+    } else if (justLeft) {
         statsManager.handleLeave(member);
-        visualManager.handleLeave(oldState.channel, member);
-    } 
-    else if (switched) {
+    } else if (switched) {
         statsManager.handleLeave(member);
         statsManager.handleJoin(member);
-        nicknameManager.triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
     }
+
+    // 2. Visuelle Kanal-Änderung (NUR beim kompletten Verlassen / Offline gehen)
+    if (justLeft) {
+        visualManager.handleLeave(oldState.channel, member);
+    }
+
+    // 3. Nickname-Manager (Klassen & 10s-Alarm bei Join/Switch)
+    nicknameManager.handleVoiceStateUpdate(oldState, newState);
 });
 
 // Event: Slash Commands an den CommandManager übergeben
