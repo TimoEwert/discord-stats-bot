@@ -1,10 +1,10 @@
 // managers/nicknameManager.js
 const CLASS_ICONS = {
-    "Magier": "🔥",
+    "Mage": "🔥",
     "Templer": "🛡️",
     "Gladiator": "⚔️",
     "Assasine": "🗡️",
-    "Waldläufer": "🏹",
+    "Bogenschütze": "🏹",
     "Beschwörer": "👻",
     "Kleriker": "❤️",
     "Kantor": "🔱"
