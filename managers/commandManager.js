@@ -37,10 +37,16 @@ class CommandManager {
 
                 for (const ch of rawChannels) {
                     if (ch.type === 2) {
-                        // 1. Entferne unsichtbare Unicode Variation Selectors (\uFE0F / \uFE0E), die das Encoding zerschießen
-                        let sanitizedName = ch.name.replace(/[\uFE0E\uFE0F]/g, '');
+                        // 1. Unicode-Normalisierung (NFC), um zusammengesetzte Zeichen zu glätten
+                        let rawName = ch.name.normalize('NFC');
+
+                        // 2. Ersetze exotische Trennzeichen (wie Fullwidth Vertical Line) durch ein normales Pipe-Zeichen
+                        rawName = rawName.replace(/[\uff5c︱]/g, '|');
+
+                        // 3. Entferne unsichtbare Variation Selectors und Steuerzeichen
+                        let sanitizedName = rawName.replace(/[\uFE0E\uFE0F\u200B-\u200D\uFEFF]/g, '');
                         
-                        // 2. Präfixe/Suffixe bereinigen
+                        // 4. Präfixe/Suffixe bereinigen
                         let cleanName = sanitizedName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
                         await pool.query(
@@ -50,8 +56,8 @@ class CommandManager {
                         count++;
                     }
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen bereinigt und gespeichert.`);
-                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich und fehlerfrei gespeichert!`);
+                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen normalisiert und gespeichert.`);
+                await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich normalisiert gespeichert!`);
             }
             // Befehl zum Zurücksetzen der Sprachkanäle auf die gespeicherten Originalnamen
             else if (interaction.commandName === 'reset_channel_refs') {
