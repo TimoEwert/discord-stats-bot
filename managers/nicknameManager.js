@@ -4,7 +4,6 @@ const CLASS_ICONS = {
     "Waldläufer": "🏹", "Beschwörer": "👻", "Kleriker": "❤️", "Kantor": "🔱"
 };
 
-// Map zur Verwaltung der aktiven Nickname-Timer
 const activeNicknameResets = new Map();
 
 class NicknameManager {
@@ -12,7 +11,20 @@ class NicknameManager {
         this.name = "NicknameManager";
     }
 
-    // 1. Temporärer Alarm (z.B. ⚠️⚠️⚠️User bei Betritt / Wechsel) für 10 Sekunden
+    // Lauscht auf Voice-Events und kümmert sich komplett eigenständig um den Nickname-Alarm
+    async handleVoiceStateUpdate(oldState, newState) {
+        const member = newState.member || oldState.member;
+        if (!member || member.user.bot) return;
+
+        const justJoined = !oldState.channelId && newState.channelId;
+        const switched = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
+
+        if (justJoined || switched) {
+            const displayName = member.displayName;
+            await this.triggerNicknameAlert(member, `⚠️⚠️⚠️${displayName}`);
+        }
+    }
+
     async triggerNicknameAlert(member, alertName) {
         if (!member) return;
         try {
@@ -21,7 +33,6 @@ class NicknameManager {
                 activeNicknameResets.delete(member.id);
             }
 
-            // Nur umbenennen, wenn der User nicht der Server-Owner ist (Schutz vor API-Fehlern)
             if (member.id !== member.guild.ownerId && member.id !== member.client.user.id) {
                 await member.setNickname(alertName.substring(0, 32));
                 console.log(`🏷️ [NICKNAME ALERT] ${member.user.tag} temporär auf '${alertName}' gesetzt.`);
@@ -46,7 +57,6 @@ class NicknameManager {
         }
     }
 
-    // 2. Standard Klassen-Nickname (Dauerzustand)
     async updateMemberNickname(member, client) {
         if (member.id === member.guild.ownerId || member.id === client.user.id) return false;
         try {
