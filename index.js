@@ -1,4 +1,4 @@
-// index.js - Version 3.1 (Senior Programming Partner - Komplettversion)
+// index.js - Version 3.2 (Senior Programming Partner - Komplettversion)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -36,7 +36,7 @@ const ALL_ICONS_ARRAY = [...Object.values(CLASS_ICONS), ".⚠️⚠️⚠️", "
 // Map zur temporären Speicherung der Voice-Startzeiten
 const activeVoiceSessions = new Map();
 
-// Map zur sicheren Verwaltung der Kanal-Timer und Ursprungsnamen (verhindert Überschneidungen)
+// Map zur sicheren Verwaltung der Kanal-Timer und Ursprungsnamen
 const channelTimers = new Map();
 
 process.on('unhandledRejection', error => {
@@ -47,7 +47,7 @@ client.once('ready', async () => {
     console.log(`✅ Bot online als ${client.user.tag}`);
     await initDatabase();
 
-    // Slash Commands registrieren (Punkt 4 & 5)
+    // Slash Commands registrieren
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         const commands = [
@@ -81,14 +81,13 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     const justJoinedVoice = !oldState.channelId && newState.channelId;
     const justLeftVoice = oldState.channelId && !newState.channelId;
 
-    // 1. STATISTIK & 10-SEKUNDEN KANAL-UMBENENNUNG (Punkt 1 & 6)
     if (justJoinedVoice) {
         activeVoiceSessions.set(userId, new Date());
         
-        // Kanalname temporär anpassen (Punkt 6)
+        // Kanalname temporär anpassen
         await triggerChannelVisual(newState.channel, `🟢 ${displayName} betritt`);
 
-        // Klassen/Nicknamen im Hintergrund aktualisieren (Punkt 3)
+        // Klassen/Nicknamen im Hintergrund aktualisieren
         await updateMemberNickname(member);
 
     } else if (justLeftVoice) {
@@ -108,18 +107,17 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             activeVoiceSessions.delete(userId);
         }
 
-        // Kanalname temporär anpassen (Punkt 6)
+        // Kanalname temporär anpassen
         await triggerChannelVisual(oldState.channel, `🔴 ${displayName} verlässt`);
     }
 });
 
-// Event: Slash Commands verarbeiten (Punkt 4 & 5)
+// Event: Slash Commands verarbeiten
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    // BEFEHL 1: /sync_nicknames (Punkt 4)
     if (interaction.commandName === 'sync_nicknames') {
-        await interaction.deferReply({ flags: [64] }); // Ephemeral reply
+        await interaction.deferReply({ flags: [64] });
 
         try {
             const members = await interaction.guild.members.fetch();
@@ -139,12 +137,10 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // BEFEHL 2: /ranking_aries (Punkt 5 - MEE6 Style Embed)
     else if (interaction.commandName === 'ranking_aries') {
         await interaction.deferReply();
 
         try {
-            // Top 10 User nach Gesamt-Voice-Zeit aus der Datenbank abfragen
             const result = await pool.query(`
                 SELECT username, SUM(duration_seconds) as total_seconds 
                 FROM voice_sessions 
@@ -184,7 +180,6 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // BEFEHL 3: /wochen_stats (Punkt 2 - Wochen- & Zeitfenster Statistik)
     else if (interaction.commandName === 'wochen_stats') {
         await interaction.deferReply();
 
@@ -207,33 +202,36 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Hilfsfunktion: Sprachkanal-Name für 10 Sekunden ändern mit sauberer Timer-Verwaltung (Punkt 6)
+// Hilfsfunktion: Sprachkanal-Name mit präzisem Error-Logging für Rate-Limits
 async function triggerChannelVisual(channel, temporaryName) {
     if (!channel) return;
 
     try {
-        // Falls bereits ein Timer für diesen Kanal läuft, diesen abbrechen und alten Namen bewahren
+        // Wenn bereits ein Timer läuft, diesen löschen
         if (channelTimers.has(channel.id)) {
             clearTimeout(channelTimers.get(channel.id).timeout);
         } else {
-            // Wenn kein Timer läuft, ist der aktuelle Kanalname der echte Ursprungsname
-            channelTimers.set(channel.id, {
-                originalName: channel.name,
-                timeout: null
-            });
+            // Nur den echten Namen sichern, wenn der Kanal gerade nicht im Animations-Modus ist
+            if (!channel.name.startsWith('🟢') && !channel.name.startsWith('🔴')) {
+                channelTimers.set(channel.id, {
+                    originalName: channel.name,
+                    timeout: null
+                });
+            }
         }
 
         const channelData = channelTimers.get(channel.id);
+        if (!channelData) return;
 
         // Kanalnamen auf temporären Status setzen
         await channel.setName(temporaryName);
 
-        // Neuen 10-Sekunden-Timer starten
+        // Timer für 10 Sekunden starten
         const timeout = setTimeout(async () => {
             try {
                 await channel.setName(channelData.originalName);
             } catch (err) {
-                console.error('❌ Fehler beim Zurücksetzen des Kanalnamens:', err);
+                console.error('❌ Fehler beim Zurücksetzen des Kanalnamens:', err.message);
             } finally {
                 channelTimers.delete(channel.id);
             }
@@ -242,11 +240,12 @@ async function triggerChannelVisual(channel, temporaryName) {
         channelData.timeout = timeout;
 
     } catch (err) {
-        console.error('❌ Fehler beim Ändern des Kanalnamens (Rechte prüfen!):', err);
+        // Hier sehen wir jetzt sofort in den Logs, ob Discord wegen Rate-Limits blockiert (Status 429)
+        console.error(`❌ Discord API Fehler beim Ändern des Kanalnamens (Code ${err.status || 'unbekannt'}):`, err.message);
     }
 }
 
-// Hilfsfunktion: Nickname anpassen & Klassen in PostgreSQL ablegen (Punkt 3 & 4)
+// Hilfsfunktion: Nickname anpassen & Klassen in PostgreSQL ablegen
 async function updateMemberNickname(member) {
     if (member.id === member.guild.ownerId || member.id === client.user.id) {
         return false;
