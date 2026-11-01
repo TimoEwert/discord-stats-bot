@@ -13,7 +13,6 @@ async function initDatabase() {
         CREATE TABLE IF NOT EXISTS voice_sessions (
             id SERIAL PRIMARY KEY,
             user_id TEXT NOT NULL,
-            username TEXT NOT NULL,
             joined_at TIMESTAMP NOT NULL,
             left_at TIMESTAMP NOT NULL,
             duration_seconds INT NOT NULL,
@@ -29,7 +28,7 @@ async function initDatabase() {
             is_alert_active BOOLEAN DEFAULT FALSE
         )
     `);
-    console.log(`✅ [DB] PostgreSQL Datenbank & Tabellen erfolgreich initialisiert (UTF-8 aktiv).`);
+    console.log(`✅ [DB] PostgreSQL Datenbank & Tabellen erfolgreich initialisiert (UTF-8 aktiv, ID-basiertes Schema).`);
 }
 
 module.exports = { pool, initDatabase };
