@@ -70,7 +70,6 @@ class CommandManager {
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
                 
-                // Aggregiere nach user_id und summiere die Minuten auf
                 const result = await pool.query(`SELECT user_id, username, SUM(duration_minutes) as total_minutes FROM voice_sessions GROUP BY user_id, username ORDER BY total_minutes DESC LIMIT 10`);
                 const embed = new EmbedBuilder().setColor(0x00AE86).setTitle('🏆 ARIES COMMUNITY - VOICE RANKING').setTimestamp();
                 
@@ -81,7 +80,6 @@ class CommandManager {
                     for (let i = 0; i < result.rows.length; i++) {
                         const row = result.rows[i];
                         
-                        // Serverspezifischen Namen (DisplayName) live ermitteln
                         let displayName = row.username;
                         try {
                             const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
@@ -109,11 +107,39 @@ class CommandManager {
             }
             else if (interaction.commandName === 'wochen_stats') {
                 await interaction.deferReply();
+                
+                // Wir holen hier die Gesamtübersicht der letzten Einträge / Stammzeiten (z.B. Top 15 sortiert nach Minuten)
+                const result = await pool.query(`SELECT user_id, username, SUM(duration_minutes) as total_minutes, COUNT(id) as sessions_count FROM voice_sessions GROUP BY user_id, username ORDER BY total_minutes DESC LIMIT 15`);
                 const embed = new EmbedBuilder()
                     .setColor(0x3498DB)
-                    .setTitle('📊 COMMUNITY STAMMZEITEN')
-                    .setDescription('Auswertung der Sprachkanal-Präsenzen aktiv.')
+                    .setTitle('📊 COMMUNITY STAMMZEITEN (Gesamtübersicht)')
                     .setTimestamp();
+
+                if (result.rows.length === 0) {
+                    embed.setDescription('Es liegen noch keine aufgezeichneten Stammzeiten vor.');
+                } else {
+                    let desc = 'Übersicht der erfassten Sprachkanal-Präsenzen:\n\n';
+                    for (let i = 0; i < result.rows.length; i++) {
+                        const row = result.rows[i];
+                        
+                        let displayName = row.username;
+                        try {
+                            const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
+                            if (member) {
+                                displayName = member.displayName
+                                    .replace(/^[🔴⚠️.]+/g, '')
+                                    .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
+                                    .trim();
+                            }
+                        } catch (err) {}
+
+                        const h = Math.floor(row.total_minutes / 60);
+                        const m = row.total_minutes % 60;
+
+                        desc += `👤 **${displayName}** — ⏱️ **${h}h ${m}m** (${row.total_minutes} Min. in ${row.sessions_count} Sessions)\n`;
+                    }
+                    embed.setDescription(desc);
+                }
                 await interaction.editReply({ embeds: [embed] });
             }
             else if (interaction.commandName === 'sync_nicknames') {
