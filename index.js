@@ -1,4 +1,4 @@
-// index.js - Version 3.0 (Senior Programming Partner - Komplettversion)
+// index.js - Version 3.1 (Senior Programming Partner - Komplettversion)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -35,6 +35,9 @@ const ALL_ICONS_ARRAY = [...Object.values(CLASS_ICONS), ".⚠️⚠️⚠️", "
 
 // Map zur temporären Speicherung der Voice-Startzeiten
 const activeVoiceSessions = new Map();
+
+// Map zur sicheren Verwaltung der Kanal-Timer und Ursprungsnamen (verhindert Überschneidungen)
+const channelTimers = new Map();
 
 process.on('unhandledRejection', error => {
     console.error('⚠️ Unbehandeltes Promise-Rejection abgefangen:', error);
@@ -114,7 +117,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    // BFEHL 1: /sync_nicknames (Punkt 4)
+    // BEFEHL 1: /sync_nicknames (Punkt 4)
     if (interaction.commandName === 'sync_nicknames') {
         await interaction.deferReply({ flags: [64] }); // Ephemeral reply
 
@@ -204,20 +207,40 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Hilfsfunktion: Sprachkanal-Name für 10 Sekunden ändern (Punkt 6)
+// Hilfsfunktion: Sprachkanal-Name für 10 Sekunden ändern mit sauberer Timer-Verwaltung (Punkt 6)
 async function triggerChannelVisual(channel, temporaryName) {
     if (!channel) return;
 
-    const originalName = channel.name;
     try {
+        // Falls bereits ein Timer für diesen Kanal läuft, diesen abbrechen und alten Namen bewahren
+        if (channelTimers.has(channel.id)) {
+            clearTimeout(channelTimers.get(channel.id).timeout);
+        } else {
+            // Wenn kein Timer läuft, ist der aktuelle Kanalname der echte Ursprungsname
+            channelTimers.set(channel.id, {
+                originalName: channel.name,
+                timeout: null
+            });
+        }
+
+        const channelData = channelTimers.get(channel.id);
+
+        // Kanalnamen auf temporären Status setzen
         await channel.setName(temporaryName);
-        setTimeout(async () => {
+
+        // Neuen 10-Sekunden-Timer starten
+        const timeout = setTimeout(async () => {
             try {
-                await channel.setName(originalName);
+                await channel.setName(channelData.originalName);
             } catch (err) {
                 console.error('❌ Fehler beim Zurücksetzen des Kanalnamens:', err);
+            } finally {
+                channelTimers.delete(channel.id);
             }
         }, 10000);
+
+        channelData.timeout = timeout;
+
     } catch (err) {
         console.error('❌ Fehler beim Ändern des Kanalnamens (Rechte prüfen!):', err);
     }
