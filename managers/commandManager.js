@@ -28,10 +28,9 @@ class CommandManager {
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
                 for (const [_, channel] of channels) {
-                    let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
-                    
-                    // Fallback-Bereinigung für verschluckte Unicode-Zeichen bei bestimmten Symbolen
-                    cleanName = cleanName.replace(/\uFFFD/g, '💬');
+                    // Erzwinge die Konvertierung des Kanalnamens über Buffer zu echtem UTF-8
+                    let rawName = Buffer.from(channel.name, 'utf8').toString('utf8');
+                    let cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
 
                     await pool.query(
                         `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
