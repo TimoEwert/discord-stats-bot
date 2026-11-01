@@ -1,4 +1,4 @@
-// index.js - Version 3.8 (Senior Programming Partner - Komplettversion)
+// index.js - Version 3.9 (Senior Programming Partner - Komplettversion mit Ticker & Logging)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -36,18 +36,19 @@ const ALL_ICONS_ARRAY = [...Object.values(CLASS_ICONS), ".⚠️⚠️⚠️", "
 // Map zur temporären Speicherung der Voice-Startzeiten
 const activeVoiceSessions = new Map();
 
-// Map für aktive Timer (damit der Interval-Guard weiß, welcher Kanal gerade animiert wird)
-const activeChannelAnimations = new Set();
+// Robuste Kanal-Ticker und Queue-Verwaltung für gleichzeitige User
+// channelId -> { originalName: string, tickerQueue: string[], isRunning: boolean, currentTimeout: NodeJS.Timeout }
+const channelTickers = new Map();
 
 process.on('unhandledRejection', error => {
-    console.error('⚠️ Unbehandeltes Promise-Rejection abgefangen:', error);
+    console.error('⚠️ [FATAL] Unbehandeltes Promise-Rejection abgefangen:', error);
 });
 
 client.once('ready', async () => {
-    console.log(`✅ Bot online als ${client.user.tag}`);
+    console.log(`✅ [INIT] Bot online als ${client.user.tag}`);
     await initDatabase();
 
-    // Zusätzliche Tabelle für Kanal-Referenzen prüfen/anlegen
+    // Tabelle für Kanal-Referenzen sicherstellen
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS channel_references (
@@ -55,11 +56,12 @@ client.once('ready', async () => {
                 original_name TEXT NOT NULL
             )
         `);
+        console.log(`✅ [DB] Tabelle 'channel_references' erfolgreich geprüft/erstellt.`);
     } catch (e) {
-        console.error("Fehler beim Erstellen der channel_references Tabelle:", e);
+        console.error("❌ [DB-FEHLER] Konnte channel_references Tabelle nicht erstellen:", e);
     }
 
-    // Slash Commands registrieren (inkl. /set_channels & /sync_channels)
+    // Slash Commands registrieren
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         const commands = [
@@ -79,37 +81,38 @@ client.once('ready', async () => {
                 .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         ];
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('✅ Slash-Commands erfolgreich registriert.');
+        console.log('✅ [DISCORD] Slash-Commands erfolgreich registriert.');
     } catch (error) {
-        console.error("Fehler beim Registrieren der Befehle:", error);
+        console.error("❌ [DISCORD-FEHLER] Fehler beim Registrieren der Befehle:", error);
     }
 
-    // HINTERGRUND-WATCHDOG: Prüft alle 60 Sekunden, ob Kanäle hängen geblieben sind
+    // WATCHDOG: Prüft alle 60 Sekunden, ob Kanäle hängen geblieben sind
     setInterval(async () => {
         try {
             const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
             if (result.rows.length === 0) return;
 
             for (const row of result.rows) {
-                // Wenn für diesen Kanal gerade eine Animation aktiv ist, überspringen
-                if (activeChannelAnimations.has(row.channel_id)) continue;
+                // Wenn für diesen Kanal gerade ein aktiver Ticker läuft, lassen wir ihn in Ruhe
+                if (channelTickers.has(row.channel_id) && channelTickers.get(row.channel_id).isRunning) {
+                    continue;
+                }
 
                 const channel = client.channels.cache.get(row.channel_id);
                 if (channel && channel.isVoiceBased()) {
-                    // Falls der Name ein Status-Prefix hat (hängengeblieben), hart zurücksetzen
                     if (channel.name.startsWith('🟢') || channel.name.startsWith('🔴') || channel.name.startsWith('🔄')) {
+                        console.log(`🛠️ [WATCHDOG] Korrigiere hängengebliebenen Kanal '${channel.name}' -> Referenz: '${row.original_name}'`);
                         await channel.setName(row.original_name);
-                        console.log(`🛠️ Watchdog hat hängengebliebenen Kanal ${channel.name} auf Referenz '${row.original_name}' zurückgesetzt.`);
                     }
                 }
             }
         } catch (err) {
-            console.error("Fehler im Channel-Watchdog:", err);
+            console.error("❌ [WATCHDOG-FEHLER] Fehler im Channel-Watchdog:", err);
         }
-    }, 60000); // Jede Minute
+    }, 60000);
 });
 
-// Event: Voice State Update (Voice-Tracking, Klassen-Sync & Kanal-Umbenennung)
+// Event: Voice State Update mit detailliertem Logging
 client.on('voiceStateUpdate', async (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
@@ -123,27 +126,37 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     const switchedVoice = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
 
     if (justJoinedVoice) {
+        console.log(`🎙️ [VOICE JOIN] ${displayName} (${username}) hat Kanal ${newState.channel.name} betreten.`);
         activeVoiceSessions.set(userId, new Date());
-        await triggerChannelVisual(newState.channel, `🟢 ${displayName} betritt`);
+        
+        await queueChannelTicker(newState.channel, `🟢 ${displayName} betritt`);
         await updateMemberNickname(member);
-    } else if (justLeftVoice) {
+    } 
+    else if (justLeftVoice) {
+        console.log(`🎙️ [VOICE LEAVE] ${displayName} (${username}) hat Kanal ${oldState.channel.name} verlassen.`);
         const joinTime = activeVoiceSessions.get(userId);
         if (joinTime) {
             const leaveTime = new Date();
             const durationSeconds = Math.floor((leaveTime - joinTime) / 1000);
 
-            try {
-                await pool.query(
-                    `INSERT INTO voice_sessions (user_id, username, joined_at, left_at, duration_seconds) VALUES ($1, $2, $3, $4, $5)`,
-                    [userId, username, joinTime, leaveTime, durationSeconds]
-                );
-            } catch (err) {
-                console.error('❌ Fehler beim Speichern der Voice-Session:', err);
+            if (durationSeconds > 0) {
+                try {
+                    await pool.query(
+                        `INSERT INTO voice_sessions (user_id, username, joined_at, left_at, duration_seconds) VALUES ($1, $2, $3, $4, $5)`,
+                        [userId, username, joinTime, leaveTime, durationSeconds]
+                    );
+                    console.log(`💾 [DB] Session gespeichert für ${username}: ${durationSeconds} Sekunden.`);
+                } catch (err) {
+                    console.error('❌ [DB-FEHLER] Fehler beim Speichern der Voice-Session:', err);
+                }
             }
             activeVoiceSessions.delete(userId);
         }
-        await triggerChannelVisual(oldState.channel, `🔴 ${displayName} verlässt`);
-    } else if (switchedVoice) {
+
+        await queueChannelTicker(oldState.channel, `🔴 ${displayName} verlässt`);
+    } 
+    else if (switchedVoice) {
+        console.log(`🎙️ [VOICE SWITCH] ${displayName} (${username}) gewechselt von ${oldState.channel.name} zu ${newState.channel.name}.`);
         const joinTime = activeVoiceSessions.get(userId);
         const leaveTime = new Date();
 
@@ -156,14 +169,14 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                         [userId, username, joinTime, leaveTime, durationSeconds]
                     );
                 } catch (err) {
-                    console.error('❌ Fehler beim Speichern der Voice-Session (Switch):', err);
+                    console.error('❌ [DB-FEHLER] Fehler beim Speichern der Switch-Session:', err);
                 }
             }
         }
 
         activeVoiceSessions.set(userId, leaveTime);
-        await triggerChannelVisual(oldState.channel, `🔴 ${displayName} verlässt`);
-        await triggerChannelVisual(newState.channel, `🔄 ${displayName} wechselt`);
+        await queueChannelTicker(oldState.channel, `🔴 ${displayName} verlässt`);
+        await queueChannelTicker(newState.channel, `🔄 ${displayName} wechselt`);
         await updateMemberNickname(member);
     }
 });
@@ -172,7 +185,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    // BEFEHL: /save_channel_refs (Referenzen in DB schreiben)
     if (interaction.commandName === 'save_channel_refs') {
         await interaction.deferReply({ flags: [64] });
 
@@ -182,7 +194,6 @@ client.on('interactionCreate', async (interaction) => {
             let count = 0;
 
             for (const [_, channel] of channels) {
-                // Falls der Kanal gerade im Status ist, reinigen wir ihn vor dem Speichern
                 let cleanName = channel.name;
                 if (cleanName.startsWith('🟢') || cleanName.startsWith('🔴') || cleanName.startsWith('🔄')) {
                     cleanName = cleanName.replace(/^(🟢|🔴|🔄)\s+.*?\s+(betritt|verlässt|wechselt)$/, '').trim();
@@ -196,9 +207,10 @@ client.on('interactionCreate', async (interaction) => {
                 count++;
             }
 
+            console.log(`✅ [REFS] ${count} Sprachkanal-Referenzen durch Administrator gespeichert.`);
             await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich in der Datenbank gespeichert!`);
         } catch (e) {
-            console.error("Fehler beim Speichern der Kanal-Referenzen:", e);
+            console.error("❌ [REFS-FEHLER] Fehler beim Speichern der Kanal-Referenzen:", e);
             await interaction.editReply(`❌ Fehler: ${e.message}`);
         }
     }
@@ -219,7 +231,7 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.editReply(`✅ Nicknames für **${updatedCount}** Mitglieder aktualisiert und Klassen in der DB gespeichert.`);
         } catch (e) {
-            console.error("Fehler beim Sync-Befehl:", e);
+            console.error("❌ [SYNC-FEHLER] Fehler beim Sync-Befehl:", e);
             await interaction.editReply(`❌ Ein Fehler ist aufgetreten: ${e.message}`);
         }
     }
@@ -262,7 +274,7 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.editReply({ embeds: [embed] });
         } catch (e) {
-            console.error("Fehler beim Ranking-Befehl:", e);
+            console.error("❌ [RANKING-FEHLER] Fehler beim Laden des Rankings:", e);
             await interaction.editReply(`❌ Fehler beim Laden des Rankings: ${e.message}`);
         }
     }
@@ -283,13 +295,13 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.editReply({ embeds: [embed] });
         } catch (e) {
-            console.error("Fehler beim Stats-Befehl:", e);
+            console.error("❌ [STATS-FEHLER] Fehler beim Laden der Statistiken:", e);
             await interaction.editReply(`❌ Fehler beim Laden der Statistiken.`);
         }
     }
 });
 
-// Hilfsfunktion: Holt den echten Namen aus der DB-Referenz
+// Hilfsfunktion: Holt den sauberen Originalnamen aus der DB-Referenz
 async function getOriginalChannelName(channel) {
     try {
         const res = await pool.query(`SELECT original_name FROM channel_references WHERE channel_id = $1`, [channel.id]);
@@ -297,37 +309,73 @@ async function getOriginalChannelName(channel) {
             return res.rows[0].original_name;
         }
     } catch (e) {
-        console.error("Fehler beim Abrufen der Kanal-Referenz:", e);
+        console.error("❌ [DB-FEHLER] Konnte Kanal-Referenz nicht abrufen:", e);
     }
-    // Fallback falls noch nicht per Befehl gespeichert wurde
+    // Fallback falls nicht in DB gefunden
     let clean = channel.name.replace(/^(🟢|🔴|🔄)\s+.*?\s+(betritt|verlässt|wechselt)$/, '').trim();
     return clean || "Voice Channel";
 }
 
-// Robuste Kanal-Umbenennung unter Verwendung der DB-Referenz
-async function triggerChannelVisual(channel, temporaryName) {
+// Sekundengenauer Ticker & Queue für gleichzeitige Events
+async function queueChannelTicker(channel, statusText) {
     if (!channel) return;
 
-    try {
-        activeChannelAnimations.add(channel.id);
-        const originalName = await getOriginalChannelName(channel);
-
-        await channel.setName(temporaryName);
-
-        setTimeout(async () => {
-            try {
-                await channel.setName(originalName);
-            } catch (err) {
-                console.error(`❌ Fehler beim Wiederherstellen des Kanalnamens (${originalName}):`, err.message);
-            } finally {
-                activeChannelAnimations.delete(channel.id);
-            }
-        }, 10000);
-
-    } catch (err) {
-        activeChannelAnimations.delete(channel.id);
-        console.error(`❌ Discord API Fehler beim Umbenennen:`, err.message);
+    if (!channelTickers.has(channel.id)) {
+        channelTickers.set(channel.id, {
+            originalName: null,
+            tickerQueue: [],
+            isRunning: false
+        });
     }
+
+    const data = channelTickers.get(channel.id);
+
+    // Ursprungsnamen einmalig laden falls nicht vorhanden
+    if (!data.originalName) {
+        data.originalName = await getOriginalChannelName(channel);
+    }
+
+    // Status in die Ticker-Warteschlange legen
+    data.tickerQueue.push(statusText);
+    console.log(`📋 [TICKER QUEUE] Kanal '${data.originalName}': Neuer Status '${statusText}' eingereiht. (Queue-Länge: ${data.tickerQueue.length})`);
+
+    // Wenn der Ticker noch nicht läuft, starten
+    if (!data.isRunning) {
+        runChannelTicker(channel);
+    }
+}
+
+// Abarbeitung der Ticker-Warteschlange im Sekundentakt
+async function runChannelTicker(channel) {
+    const data = channelTickers.get(channel.id);
+    if (!data || data.tickerQueue.length === 0) {
+        if (data) {
+            data.isRunning = false;
+            // Wenn Queue leer ist, nach kurzer Pause wieder auf den echten Originalnamen setzen
+            try {
+                console.log(`✨ [TICKER ENDE] Kanal '${channel.name}' kehrt zu Original zurück: '${data.originalName}'`);
+                await channel.setName(data.originalName);
+            } catch (err) {
+                console.error(`❌ [DISCORD API] Fehler beim Wiederherstellen von '${data.originalName}':`, err.message);
+            }
+        }
+        return;
+    }
+
+    data.isRunning = true;
+    const nextStatus = data.tickerQueue.shift();
+
+    try {
+        console.log(`🔄 [TICKER UPDATE] Setze Kanal '${channel.name}' auf: '${nextStatus}'`);
+        await channel.setName(nextStatus);
+    } catch (err) {
+        console.error(`❌ [DISCORD API] Fehler beim Ticker-Update (Rate-Limit / Rechte):`, err.message);
+    }
+
+    // Exakt im Sekundentakt (1000ms) den nächsten Status oder das Ende verarbeiten
+    setTimeout(() => {
+        runChannelTicker(channel);
+    }, 1000);
 }
 
 // Hilfsfunktion: Nickname anpassen & Klassen in PostgreSQL ablegen
@@ -377,10 +425,11 @@ async function updateMemberNickname(member) {
 
         if (member.displayName !== newName) {
             await member.setNickname(newName);
+            console.log(`🏷️ [NICKNAME] Aktualisiert für ${member.user.tag} -> ${newName}`);
             return true;
         }
     } catch (e) {
-        console.error(`❌ Fehler beim Anpassen des Nicknamens für ${member.user.tag}:`, e.message);
+        console.error(`❌ [NICKNAME-FEHLER] Fehler beim Anpassen für ${member.user.tag}:`, e.message);
     }
     return false;
 }
