@@ -4,11 +4,12 @@ require('dotenv').config();
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+    // Erzwinge UTF-8 für Emojis und Sonderzeichen
+    options: '-c client_encoding=UTF8'
 });
 
 async function initDatabase() {
-    // Tabelle mit Minuten-Spalte
     await pool.query(`
         CREATE TABLE IF NOT EXISTS voice_sessions (
             id SERIAL PRIMARY KEY,
@@ -24,10 +25,12 @@ async function initDatabase() {
     await pool.query(`
         CREATE TABLE IF NOT EXISTS channel_references (
             channel_id TEXT PRIMARY KEY,
-            original_name TEXT NOT NULL
+            original_name TEXT NOT NULL,
+            current_display_name TEXT,
+            is_alert_active BOOLEAN DEFAULT FALSE
         )
     `);
-    console.log(`✅ [DB] PostgreSQL Datenbank & Tabellen erfolgreich initialisiert.`);
+    console.log(`✅ [DB] PostgreSQL Datenbank & Tabellen erfolgreich initialisiert (UTF-8 aktiv).`);
 }
 
 module.exports = { pool, initDatabase };
