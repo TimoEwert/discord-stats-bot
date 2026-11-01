@@ -3,44 +3,46 @@ const { pool } = require('../database');
 const activeChannelResets = new Map();
 
 class VisualManager {
-    async triggerChannelLeaveAlert(channel, alertChannelName) {
-        if (!channel) return;
+    constructor() {
+        this.name = "VisualManager";
+    }
+
+    async handleLeave(oldChannel, member) {
+        if (!oldChannel) return;
 
         try {
-            if (activeChannelResets.has(channel.id)) {
-                clearTimeout(activeChannelResets.get(channel.id));
-                activeChannelResets.delete(channel.id);
+            if (activeChannelResets.has(oldChannel.id)) {
+                clearTimeout(activeChannelResets.get(oldChannel.id));
+                activeChannelResets.delete(oldChannel.id);
             }
 
-            // Originalnamen holen (mit Fallback)
             let originalName = "Voice Channel";
             try {
-                const res = await pool.query(`SELECT original_name FROM channel_references WHERE channel_id = $1`, [channel.id]);
+                const res = await pool.query(`SELECT original_name FROM channel_references WHERE channel_id = $1`, [oldChannel.id]);
                 if (res.rows.length > 0) originalName = res.rows[0].original_name;
             } catch (e) {
-                originalName = channel.name.replace(/^🔴.*?\s+ging$/, '').trim();
+                originalName = oldChannel.name.replace(/^🔴.*?\s+ging$/, '').trim();
             }
 
-            // Sofort umbenennen
-            await channel.setName(alertChannelName.substring(0, 32));
-            console.log(`🔴 [VISUAL] Kanal ID ${channel.id} auf '${alertChannelName}' gesetzt.`);
+            const alertName = `🔴${member.displayName} ging`.substring(0, 32);
+            await oldChannel.setName(alertName);
+            console.log(`🔴 [VISUAL] Kanal ID ${oldChannel.id} auf '${alertName}' gesetzt.`);
 
-            // Nach 10 Sekunden zurücksetzen
             const timeout = setTimeout(async () => {
                 try {
-                    const freshChannel = channel.guild.channels.cache.get(channel.id);
+                    const freshChannel = oldChannel.guild.channels.cache.get(oldChannel.id);
                     if (freshChannel) {
                         await freshChannel.setName(originalName);
-                        console.log(`✨ [VISUAL RESET] Kanal ID ${channel.id} auf '${originalName}' zurückgesetzt.`);
+                        console.log(`✨ [VISUAL RESET] Kanal ID ${oldChannel.id} auf Original '${originalName}' zurückgesetzt.`);
                     }
                 } catch (err) {
                     console.error(`❌ [VISUAL RESET ERROR]:`, err.message);
                 } finally {
-                    activeChannelResets.delete(channel.id);
+                    activeChannelResets.delete(oldChannel.id);
                 }
             }, 10000);
 
-            activeChannelResets.set(channel.id, timeout);
+            activeChannelResets.set(oldChannel.id, timeout);
         } catch (e) {
             console.error(`❌ [VISUAL ERROR]:`, e.message);
         }
