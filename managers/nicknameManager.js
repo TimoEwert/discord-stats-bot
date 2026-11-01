@@ -19,7 +19,6 @@ class NicknameManager {
         const switched = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
 
         if (justJoined || switched) {
-            // Nutze den aktuellen DisplayName für den 10-Sekunden-Warn-Alert
             const currentDisplay = member.displayName.replace(/^[🔴⚠️]+/, '').trim();
             await this.triggerNicknameAlert(member, `⚠️⚠️⚠️${currentDisplay}`);
         }
@@ -60,23 +59,30 @@ class NicknameManager {
     async updateMemberNickname(member, client) {
         if (member.id === member.guild.ownerId || member.id === client.user.id) return false;
         try {
-            // Finde alle Icons, die zu den Rollen des Mitglieds passen
             const userIcons = member.roles.cache
                 .filter(role => CLASS_ICONS[role.name])
                 .map(role => CLASS_ICONS[role.name]);
 
-            // Basis ist der echte Benutzername (username), damit keine doppelten Icons entstehen
-            let cleanName = member.user.username;
-            let newName = cleanName;
+            // Nimm den aktuellen serverspezifischen Namen als Basis und entferne jegliche alten Klassen-Anhänge (| ...) sowie Alarme
+            let baseName = member.displayName
+                .replace(/^[🔴⚠️]+/, '')       // Entfernt 🔴 oder ⚠️ am Anfang
+                .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '') // Entfernt alte Icons am Ende
+                .replace(/\s*\|.*$/, '')        // Entfernt alles ab dem Trenner |
+                .trim();
 
-            if (userIcons.length > 0) {
-                newName = `${cleanName} | ${userIcons.join('')}`.substring(0, 32);
+            // Falls durch das Bereinigen ein leerer Name entstünde, nimm als Fallback den echten Username
+            if (!baseName) {
+                baseName = member.user.username;
             }
 
-            // Setze den Nicknamen nur, wenn er sich vom aktuellen unterscheidet
+            let newName = baseName;
+            if (userIcons.length > 0) {
+                newName = `${baseName} | ${userIcons.join('')}`.substring(0, 32);
+            }
+
             if (member.displayName !== newName) {
                 await member.setNickname(newName);
-                console.log(`✅ [NICKNAME SYNC] ${member.user.tag} aktualisiert auf: ${newName}`);
+                console.log(`✅ [NICKNAME SYNC] ${member.user.tag} behält Server-Namen und aktualisiert Klassen auf: ${newName}`);
                 return true;
             }
         } catch (e) {
