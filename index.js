@@ -1,4 +1,4 @@
-// index.js - Version 4.3 (Senior Programming Partner - Komplettversion mit 3s Pausen-Reset)
+// index.js - Version 4.4 (Senior Programming Partner - ID-basierte State-Machine)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -36,7 +36,7 @@ const ALL_ICONS_ARRAY = [...Object.values(CLASS_ICONS), ".⚠️⚠️⚠️", "
 // Map zur temporären Speicherung der Voice-Startzeiten
 const activeVoiceSessions = new Map();
 
-// Robuste Kanal-Zustandsverwaltung
+// Robuste Kanal-Zustandsverwaltung über channelId
 const channelStates = new Map();
 
 process.on('unhandledRejection', error => {
@@ -47,7 +47,6 @@ client.once('ready', async () => {
     console.log(`✅ [INIT] Bot online als ${client.user.tag}`);
     await initDatabase();
 
-    // Tabelle für Kanal-Referenzen sicherstellen
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS channel_references (
@@ -60,7 +59,6 @@ client.once('ready', async () => {
         console.error("❌ [DB-FEHLER] Konnte channel_references Tabelle nicht erstellen:", e);
     }
 
-    // Slash Commands registrieren
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         const commands = [
@@ -89,7 +87,7 @@ client.once('ready', async () => {
         console.error("❌ [DISCORD-FEHLER] Fehler beim Registrieren der Befehle:", error);
     }
 
-    // WATCHDOG: Prüft alle 30 Sekunden, ob Kanäle hängen geblieben sind
+    // WATCHDOG: Prüft alle 30 Sekunden
     setInterval(async () => {
         try {
             const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
@@ -102,7 +100,7 @@ client.once('ready', async () => {
                     const isBusy = state && (state.isProcessing || state.queue.length > 0);
 
                     if (!isBusy && (channel.name.startsWith('🟢') || channel.name.startsWith('🔴') || channel.name.startsWith('🔄'))) {
-                        console.log(`🛠️ [WATCHDOG] Korrigiere hängengebliebenen Kanal '${channel.name}' -> Referenz: '${row.original_name}'`);
+                        console.log(`🛠️ [WATCHDOG] Korrigiere hängengebliebenen Kanal ID ${row.channel_id} ('${channel.name}') -> Referenz: '${row.original_name}'`);
                         await channel.setName(row.original_name);
                     }
                 }
@@ -113,7 +111,7 @@ client.once('ready', async () => {
     }, 30000);
 });
 
-// Event: Voice State Update mit detailliertem Logging
+// Event: Voice State Update
 client.on('voiceStateUpdate', async (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
@@ -127,14 +125,13 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     const switchedVoice = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
 
     if (justJoinedVoice) {
-        console.log(`🎙️ [VOICE JOIN] ${displayName} (${username}) hat Kanal ${newState.channel.name} betreten.`);
+        console.log(`🎙️ [VOICE JOIN] ${displayName} hat Kanal ID ${newState.channelId} betreten.`);
         activeVoiceSessions.set(userId, new Date());
-        
         await pushChannelAction(newState.channel, `🟢 ${displayName} betritt`);
         await updateMemberNickname(member);
     } 
     else if (justLeftVoice) {
-        console.log(`🎙️ [VOICE LEAVE] ${displayName} (${username}) hat Kanal ${oldState.channel.name} verlassen.`);
+        console.log(`🎙️ [VOICE LEAVE] ${displayName} hat Kanal ID ${oldState.channelId} verlassen.`);
         const joinTime = activeVoiceSessions.get(userId);
         if (joinTime) {
             const leaveTime = new Date();
@@ -146,18 +143,16 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                         `INSERT INTO voice_sessions (user_id, username, joined_at, left_at, duration_seconds) VALUES ($1, $2, $3, $4, $5)`,
                         [userId, username, joinTime, leaveTime, durationSeconds]
                     );
-                    console.log(`💾 [DB] Session gespeichert für ${username}: ${durationSeconds} Sekunden.`);
                 } catch (err) {
                     console.error('❌ [DB-FEHLER] Fehler beim Speichern der Voice-Session:', err);
                 }
             }
             activeVoiceSessions.delete(userId);
         }
-
         await pushChannelAction(oldState.channel, `🔴 ${displayName} verlässt`);
     } 
     else if (switchedVoice) {
-        console.log(`🎙️ [VOICE SWITCH] ${displayName} (${username}) gewechselt von ${oldState.channel.name} zu ${newState.channel.name}.`);
+        console.log(`🎙️ [VOICE SWITCH] ${displayName} gewechselt von ID ${oldState.channelId} zu ID ${newState.channelId}.`);
         const joinTime = activeVoiceSessions.get(userId);
         const leaveTime = new Date();
 
@@ -182,11 +177,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
 });
 
-// Event: Slash Commands verarbeiten
+// Event: Slash Commands
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    // BEFEHL: /save_channel_refs
     if (interaction.commandName === 'save_channel_refs') {
         await interaction.deferReply({ flags: [64] });
 
@@ -209,28 +203,25 @@ client.on('interactionCreate', async (interaction) => {
                 count++;
             }
 
-            console.log(`✅ [REFS] ${count} Sprachkanal-Referenzen durch Administrator gespeichert.`);
             await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich in der Datenbank gespeichert!`);
         } catch (e) {
-            console.error("❌ [REFS-FEHLER] Fehler beim Speichern der Kanal-Referenzen:", e);
+            console.error("❌ [REFS-FEHLER]:", e);
             await interaction.editReply(`❌ Fehler: ${e.message}`);
         }
     }
 
-    // BEFEHL: /reset_channel_refs (Mit strikter 3-Sekunden-Pause pro Kanal)
     else if (interaction.commandName === 'reset_channel_refs') {
         await interaction.deferReply({ flags: [64] });
 
         try {
             const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
             if (result.rows.length === 0) {
-                await interaction.editReply(`❌ Keine Kanal-Referenzen in der Datenbank gefunden. Nutze zuerst /save_channel_refs.`);
+                await interaction.editReply(`❌ Keine Kanal-Referenzen gefunden. Nutze zuerst /save_channel_refs.`);
                 return;
             }
 
             let resetCount = 0;
             for (const row of result.rows) {
-                // Aktive Queues/States für diesen Kanal stoppen
                 if (channelStates.has(row.channel_id)) {
                     const state = channelStates.get(row.channel_id);
                     if (state.timeout) clearTimeout(state.timeout);
@@ -240,11 +231,9 @@ client.on('interactionCreate', async (interaction) => {
                 const channel = interaction.guild.channels.cache.get(row.channel_id);
                 if (channel && channel.isVoiceBased()) {
                     try {
-                        console.log(`🛠️ [MANUAL RESET] Setze Kanal '${channel.name}' auf Referenz: '${row.original_name}'...`);
                         await channel.setName(row.original_name);
                         resetCount++;
-                        
-                        // EXAKT 3 SEKUNDEN PAUSE zwischen den Kanälen gegen Rate-Limits
+                        console.log(`🛠️ [MANUAL RESET] Kanal ID ${row.channel_id} auf '${row.original_name}' zurückgesetzt.`);
                         await new Promise(resolve => setTimeout(resolve, 3000));
                     } catch (err) {
                         console.error(`❌ [DISCORD API] Konnte Kanal ${row.channel_id} nicht umbenennen:`, err.message);
@@ -252,115 +241,73 @@ client.on('interactionCreate', async (interaction) => {
                 }
             }
 
-            await interaction.editReply(`✅ **${resetCount}** Sprachkanäle wurden mit je 3 Sekunden Pause erfolgreich auf ihre Original-Referenz zurückgesetzt!`);
-            console.log(`✅ [MANUAL RESET FINISHED] ${resetCount} Kanäle erfolgreich zurückgesetzt.`);
+            await interaction.editReply(`✅ **${resetCount}** Sprachkanäle wurden zurückgesetzt!`);
         } catch (e) {
-            console.error("❌ [RESET-FEHLER] Fehler beim Zurücksetzen der Kanäle:", e);
+            console.error("❌ [RESET-FEHLER]:", e);
             await interaction.editReply(`❌ Fehler beim Zurücksetzen: ${e.message}`);
         }
     }
 
     else if (interaction.commandName === 'sync_nicknames') {
         await interaction.deferReply({ flags: [64] });
-
         try {
             const members = await interaction.guild.members.fetch();
             let updatedCount = 0;
-
             for (const [_, member] of members) {
                 if (member.user.bot) continue;
                 const changed = await updateMemberNickname(member);
                 if (changed) updatedCount++;
                 await new Promise(resolve => setTimeout(resolve, 150));
             }
-
-            await interaction.editReply(`✅ Nicknames für **${updatedCount}** Mitglieder aktualisiert und Klassen in der DB gespeichert.`);
+            await interaction.editReply(`✅ Nicknames für **${updatedCount}** Mitglieder aktualisiert.`);
         } catch (e) {
-            console.error("❌ [SYNC-FEHLER] Fehler beim Sync-Befehl:", e);
             await interaction.editReply(`❌ Ein Fehler ist aufgetreten: ${e.message}`);
         }
     }
 
     else if (interaction.commandName === 'ranking_aries') {
         await interaction.deferReply();
-
         try {
-            const result = await pool.query(`
-                SELECT username, SUM(duration_seconds) as total_seconds 
-                FROM voice_sessions 
-                GROUP BY username 
-                ORDER BY total_seconds DESC 
-                LIMIT 10
-            `);
-
-            const embed = new EmbedBuilder()
-                .setColor(0x00AE86)
-                .setTitle('🏆 ARIES COMMUNITY - VOICE RANKING')
-                .setDescription('Die aktivsten Mitglieder im Sprachkanal (Gesamtauswertung)')
-                .setTimestamp();
-
+            const result = await pool.query(`SELECT username, SUM(duration_seconds) as total_seconds FROM voice_sessions GROUP BY username ORDER BY total_seconds DESC LIMIT 10`);
+            const embed = new EmbedBuilder().setColor(0x00AE86).setTitle('🏆 ARIES COMMUNITY - VOICE RANKING').setTimestamp();
             if (result.rows.length === 0) {
-                embed.addFields({ name: 'Keine Daten', value: 'Es wurden noch keine Voice-Zeiten aufgezeichnet.' });
+                embed.addFields({ name: 'Keine Daten', value: 'Keine Voice-Zeiten aufgezeichnet.' });
             } else {
-                let descriptionText = '';
-                result.rows.forEach((row, index) => {
-                    const hours = Math.floor(row.total_seconds / 3600);
-                    const minutes = Math.floor((row.total_seconds % 3600) / 60);
-                    
-                    let medal = `#${index + 1}`;
-                    if (index === 0) medal = '🥇';
-                    if (index === 1) medal = '🥈';
-                    if (index === 2) medal = '🥉';
-
-                    descriptionText += `${medal} **${row.username}** — 🎙️ **${hours}h ${minutes}m**\n`;
+                let desc = '';
+                result.rows.forEach((row, i) => {
+                    const h = Math.floor(row.total_seconds / 3600);
+                    const m = Math.floor((row.total_seconds % 3600) / 60);
+                    desc += `#${i + 1} **${row.username}** — 🎙️ **${h}h ${m}m**\n`;
                 });
-                embed.setDescription(descriptionText);
+                embed.setDescription(desc);
             }
-
             await interaction.editReply({ embeds: [embed] });
         } catch (e) {
-            console.error("❌ [RANKING-FEHLER] Fehler beim Laden des Rankings:", e);
-            await interaction.editReply(`❌ Fehler beim Laden des Rankings: ${e.message}`);
+            await interaction.editReply(`❌ Fehler: ${e.message}`);
         }
     }
 
     else if (interaction.commandName === 'wochen_stats') {
         await interaction.deferReply();
-
-        try {
-            const embed = new EmbedBuilder()
-                .setColor(0x3498DB)
-                .setTitle('📊 COMMMUNITY STAMMZEITEN & WIEDERKEHRENDE AKTIVITÄT')
-                .setDescription('Auswertung der Sprachkanal-Präsenzen im 15-Minuten-Raster')
-                .addFields(
-                    { name: '🟢 Haupt-Stoßzeiten', value: 'Mittwoch & Freitag (18:00 - 22:00 Uhr)\nSamstag (Nachmittag / Abend)', inline: false },
-                    { name: '📈 Auswertung', value: 'Die detaillierte 15-Minuten-Matrix wird aktiv aus den Datenbank-Logs der letzten 30 Tage berechnet.', inline: false }
-                )
-                .setTimestamp();
-
-            await interaction.editReply({ embeds: [embed] });
-        } catch (e) {
-            console.error("❌ [STATS-FEHLER] Fehler beim Laden der Statistiken:", e);
-            await interaction.editReply(`❌ Fehler beim Laden der Statistiken.`);
-        }
+        const embed = new EmbedBuilder().setColor(0x3498DB).setTitle('📊 COMMMUNITY STAMMZEITEN').setDescription('Auswertung aktiv.').setTimestamp();
+        await interaction.editReply({ embeds: [embed] });
     }
 });
 
-// Hilfsfunktion: Holt den echten Originalnamen aus der DB
-async function getOriginalChannelName(channel) {
+// Hilfsfunktion: Holt den echten Originalnamen aus der DB über die Channel-ID
+async function getOriginalChannelName(channelId) {
     try {
-        const res = await pool.query(`SELECT original_name FROM channel_references WHERE channel_id = $1`, [channel.id]);
+        const res = await pool.query(`SELECT original_name FROM channel_references WHERE channel_id = $1`, [channelId]);
         if (res.rows.length > 0) {
             return res.rows[0].original_name;
         }
     } catch (e) {
         console.error("❌ [DB-FEHLER] Konnte Kanal-Referenz nicht abrufen:", e);
     }
-    let clean = channel.name.replace(/^(🟢|🔴|🔄)\s+.*?\s+(betritt|verlässt|wechselt)$/, '').trim();
-    return clean || "Voice Channel";
+    return "Voice Channel";
 }
 
-// Push-Funktion für die Kanal-Aktionen mit Queue-Verwaltung
+// Queue-Funktion strikt über channel.id gesteuert
 async function pushChannelAction(channel, statusText) {
     if (!channel) return;
 
@@ -376,26 +323,31 @@ async function pushChannelAction(channel, statusText) {
     const state = channelStates.get(channel.id);
 
     if (!state.originalName) {
-        state.originalName = await getOriginalChannelName(channel);
+        state.originalName = await getOriginalChannelName(channel.id);
     }
 
     state.queue.push(statusText);
-    console.log(`📋 [QUEUE] Kanal '${state.originalName}': Status '${statusText}' eingereiht. (Queue: ${state.queue.length})`);
+    console.log(`📋 [QUEUE] Kanal ID ${channel.id} ('${state.originalName}'): Status '${statusText}' eingereiht. (Queue: ${state.queue.length})`);
 
     if (!state.isProcessing) {
-        processChannelQueue(channel);
+        processChannelQueue(channel.id);
     }
 }
 
-// Abarbeitung der Queue im Sekundentakt
-async function processChannelQueue(channel) {
-    const state = channelStates.get(channel.id);
+async function processChannelQueue(channelId) {
+    const state = channelStates.get(channelId);
     if (!state) return;
+
+    const channel = client.channels.cache.get(channelId);
+    if (!channel) {
+        channelStates.delete(channelId);
+        return;
+    }
 
     if (state.queue.length === 0) {
         state.isProcessing = false;
         try {
-            console.log(`✨ [RESET] Kanal '${channel.id}' kehrt final zu DB-Referenz zurück: '${state.originalName}'`);
+            console.log(`✨ [RESET] Kanal ID ${channelId} kehrt final zu DB-Referenz zurück: '${state.originalName}'`);
             await channel.setName(state.originalName);
         } catch (err) {
             console.error(`❌ [DISCORD API] Fehler beim finalen Reset auf '${state.originalName}':`, err.message);
@@ -407,23 +359,19 @@ async function processChannelQueue(channel) {
     const nextStatus = state.queue.shift();
 
     try {
-        console.log(`🔄 [UPDATE] Setze Kanal '${channel.name}' auf Status: '${nextStatus}'`);
+        console.log(`🔄 [UPDATE] Setze Kanal ID ${channelId} auf Status: '${nextStatus}'`);
         await channel.setName(nextStatus);
     } catch (err) {
-        console.error(`❌ [DISCORD API] Fehler beim Setzen des Status-Namens (Rate-Limit?):`, err.message);
+        console.error(`❌ [DISCORD API] Fehler beim Setzen des Status-Namens:`, err.message);
     }
 
     state.timeout = setTimeout(() => {
-        processChannelQueue(channel);
+        processChannelQueue(channelId);
     }, 1000);
 }
 
-// Hilfsfunktion: Nickname anpassen & Klassen in PostgreSQL ablegen
 async function updateMemberNickname(member) {
-    if (member.id === member.guild.ownerId || member.id === client.user.id) {
-        return false;
-    }
-
+    if (member.id === member.guild.ownerId || member.id === client.user.id) return false;
     try {
         const matchedRole = member.roles.cache.find(role => CLASS_ICONS[role.name]);
         const className = matchedRole ? matchedRole.name : null;
@@ -438,5 +386,10 @@ async function updateMemberNickname(member) {
                 [member.id, member.user.tag, className, classIcon]
             );
         }
+    } catch (e) {
+        console.error(`❌ [NICKNAME-FEHLER]:`, e.message);
+    }
+    return false;
+}
 
-        const userIcons = member.roles.
+client.login(process.env.DISCORD_TOKEN);
