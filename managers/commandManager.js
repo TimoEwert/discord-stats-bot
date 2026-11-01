@@ -30,6 +30,9 @@ class CommandManager {
                 for (const [_, channel] of channels) {
                     let cleanName = channel.name.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
                     
+                    // Fallback-Bereinigung für verschluckte Unicode-Zeichen bei bestimmten Symbolen
+                    cleanName = cleanName.replace(/\uFFFD/g, '💬');
+
                     await pool.query(
                         `INSERT INTO channel_references (channel_id, original_name) VALUES ($1, $2) ON CONFLICT (channel_id) DO UPDATE SET original_name = EXCLUDED.original_name`,
                         [channel.id, cleanName || "Voice Channel"]
