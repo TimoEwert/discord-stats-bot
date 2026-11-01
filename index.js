@@ -1,4 +1,4 @@
-// index.js - Version 4.2 (Senior Programming Partner - Komplettversion mit abgesichertem Reset)
+// index.js - Version 4.3 (Senior Programming Partner - Komplettversion mit 3s Pausen-Reset)
 const { 
     Client, 
     GatewayIntentBits, 
@@ -80,7 +80,7 @@ client.once('ready', async () => {
                 .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder()
                 .setName('reset_channel_refs')
-                .setDescription('Setzt alle Sprachkanäle sofort manuell auf ihre DB-Referenznamen zurück')
+                .setDescription('Setzt alle Sprachkanäle nacheinander mit 3s Pause auf ihre DB-Referenz zurück')
                 .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         ];
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
@@ -217,7 +217,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // BEFEHL: /reset_channel_refs (Sofortige und abgesicherte Interaktion)
+    // BEFEHL: /reset_channel_refs (Mit strikter 3-Sekunden-Pause pro Kanal)
     else if (interaction.commandName === 'reset_channel_refs') {
         await interaction.deferReply({ flags: [64] });
 
@@ -240,18 +240,20 @@ client.on('interactionCreate', async (interaction) => {
                 const channel = interaction.guild.channels.cache.get(row.channel_id);
                 if (channel && channel.isVoiceBased()) {
                     try {
+                        console.log(`🛠️ [MANUAL RESET] Setze Kanal '${channel.name}' auf Referenz: '${row.original_name}'...`);
                         await channel.setName(row.original_name);
                         resetCount++;
-                        console.log(`🛠️ [MANUAL RESET] Kanal '${channel.name}' manuell auf Referenz '${row.original_name}' zurückgesetzt.`);
-                        // Kurze Pause zwischen den API-Calls, um Discord Rate-Limits zu umgehen
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                        
+                        // EXAKT 3 SEKUNDEN PAUSE zwischen den Kanälen gegen Rate-Limits
+                        await new Promise(resolve => setTimeout(resolve, 3000));
                     } catch (err) {
                         console.error(`❌ [DISCORD API] Konnte Kanal ${row.channel_id} nicht umbenennen:`, err.message);
                     }
                 }
             }
 
-            await interaction.editReply(`✅ **${resetCount}** Sprachkanäle wurden erfolgreich auf ihre Original-Referenz zurückgesetzt!`);
+            await interaction.editReply(`✅ **${resetCount}** Sprachkanäle wurden mit je 3 Sekunden Pause erfolgreich auf ihre Original-Referenz zurückgesetzt!`);
+            console.log(`✅ [MANUAL RESET FINISHED] ${resetCount} Kanäle erfolgreich zurückgesetzt.`);
         } catch (e) {
             console.error("❌ [RESET-FEHLER] Fehler beim Zurücksetzen der Kanäle:", e);
             await interaction.editReply(`❌ Fehler beim Zurücksetzen: ${e.message}`);
@@ -437,39 +439,4 @@ async function updateMemberNickname(member) {
             );
         }
 
-        const userIcons = member.roles.cache
-            .filter(role => CLASS_ICONS[role.name])
-            .map(role => CLASS_ICONS[role.name]);
-
-        let cleanName = member.displayName;
-        cleanName = cleanName.replace(/\s*\|\s*$/, '').trim();
-
-        ALL_ICONS_ARRAY.forEach(icon => {
-            cleanName = cleanName.split(icon).join('');
-        });
-
-        cleanName = cleanName.replace(/⚠️/g, '').trim();
-        cleanName = cleanName.replace(/^\./, '').trim();
-        cleanName = cleanName.replace(/\s*\|\s*$/, '').trim();
-
-        if (!cleanName) {
-            cleanName = member.user.username;
-        }
-
-        let newName = cleanName;
-        if (userIcons.length > 0) {
-            newName = `${cleanName} | ${userIcons.join('')}`.substring(0, 32);
-        }
-
-        if (member.displayName !== newName) {
-            await member.setNickname(newName);
-            console.log(`🏷️ [NICKNAME] Aktualisiert für ${member.user.tag} -> ${newName}`);
-            return true;
-        }
-    } catch (e) {
-        console.error(`❌ [NICKNAME-FEHLER] Fehler beim Anpassen für ${member.user.tag}:`, e.message);
-    }
-    return false;
-}
-
-client.login(process.env.DISCORD_TOKEN);
+        const userIcons = member.roles.
