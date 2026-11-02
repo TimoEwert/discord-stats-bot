@@ -25,7 +25,7 @@ class StatsAnalysisManager {
 
     // Verarbeitet die Auswahl aus dem Dropdown und sendet das Ergebnis öffentlich
     async handleSelectMenu(interaction) {
-        await interaction.deferUpdate(); // Ursprüngliche Nachricht aktualisieren
+        await interaction.deferUpdate();
         
         const selectedUserId = interaction.values[0];
         
@@ -42,14 +42,12 @@ class StatsAnalysisManager {
                 .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
                 .trim();
 
-            // Generiere das Heatmap-Embed für die aktuelle Woche
             const embed = await this.generateWeeklyHeatmapEmbed(
                 interaction.guild, 
                 targetMember.id, 
                 cleanDisplayName
             );
 
-            // Dropdown entfernen und Statistik öffentlich posten
             await interaction.editReply({ 
                 content: `📊 Wochen-Aktivitätsstatistik für **${cleanDisplayName}** (angefordert von <@${interaction.user.id}>):`, 
                 embeds: [embed], 
@@ -62,12 +60,12 @@ class StatsAnalysisManager {
         }
     }
 
-    // Berechnet die Aktivitäts-Matrix für die aktuelle Woche eines Users
+    // Berechnet die Aktivitäts-Matrix und die echte Minutensumme für die aktuelle Woche
     async generateWeeklyHeatmapEmbed(guild, userId, targetDisplayName) {
         try {
             await pool.query("SET client_encoding = 'UTF8'");
             const res = await pool.query(
-                `SELECT joined_at, left_at FROM voice_sessions 
+                `SELECT joined_at, left_at, duration_minutes FROM voice_sessions 
                  WHERE user_id = $1 
                    AND joined_at >= date_trunc('week', CURRENT_TIMESTAMP)`,
                 [userId]
@@ -89,19 +87,29 @@ class StatsAnalysisManager {
 
             const dayNames = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
             const weeklyMatrix = {};
+            const weeklyMinutesPerDay = {}; // Speichert die echten Minuten pro Tag
+            
             dayNames.forEach(d => {
                 weeklyMatrix[d] = new Array(48).fill(0);
+                weeklyMinutesPerDay[d] = 0;
             });
 
             for (const row of res.rows) {
                 let start = new Date(row.joined_at);
                 let end = new Date(row.left_at);
+                let sessionDuration = row.duration_minutes || 0;
 
+                // Ermittle den Wochentag des Session-Starts für die Minuten-Zuordnung
+                let jsDay = start.getDay();
+                let mappedDayIndex = jsDay === 0 ? 6 : jsDay - 1;
+                weeklyMinutesPerDay[dayNames[mappedDayIndex]] += sessionDuration;
+
+                // Raster-Aufteilung für die Visualisierung
                 let current = new Date(start);
                 while (current < end) {
-                    let jsDay = current.getDay();
-                    let mappedDayIndex = jsDay === 0 ? 6 : jsDay - 1;
-                    let dayName = dayNames[mappedDayIndex];
+                    let currJsDay = current.getDay();
+                    let currMappedIndex = currJsDay === 0 ? 6 : currJsDay - 1;
+                    let dayName = dayNames[currMappedIndex];
 
                     let hours = current.getHours();
                     let minutes = current.getMinutes();
@@ -119,6 +127,7 @@ class StatsAnalysisManager {
             for (const day of dayNames) {
                 const slots = weeklyMatrix[day];
                 const activeSlotsCount = slots.filter(val => val > 0).length;
+                const totalMinutesForDay = weeklyMinutesPerDay[day];
 
                 if (activeSlotsCount > 0) {
                     hasActivity = true;
@@ -143,9 +152,10 @@ class StatsAnalysisManager {
                     let barLength = Math.min(10, Math.ceil((activeSlotsCount / 48) * 10));
                     let bar = '█'.repeat(barLength) + '░'.repeat(10 - barLength);
 
+                    // Zeigt nun die exakte Minutensumme aus der DB anstelle von (Slots * 30)
                     embed.addFields({
                         name: `📅 ${day}`,
-                        value: `[${bar}] ${activeSlotsCount * 30} Min. aktiv\n${timeLines.slice(0, 3).join('\n')}`,
+                        value: `[${bar}] ${totalMinutesForDay} Min. aktiv\n${timeLines.slice(0, 3).join('\n')}`,
                         inline: false
                     });
                 }
