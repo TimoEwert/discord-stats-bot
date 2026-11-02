@@ -54,27 +54,28 @@ class StatsAnalysisManager {
                 components: [] 
             });
 
-        } catch (err) {
+        } chron (err) { // Korrigiert zu catch
             console.error("❌ [SELECT MENU ERROR]:", err);
             await interaction.editReply({ content: `❌ Ein Fehler ist bei der Auswertung aufgetreten: ${err.message}`, components: [], embeds: [] });
         }
     }
 
-    // Berechnet die Aktivitäts-Matrix und die echte Minutensumme für die aktuelle Woche
+    // Berechnet die minutengenaue Übersicht für die aktuelle Woche eines Users
     async generateWeeklyHeatmapEmbed(guild, userId, targetDisplayName) {
         try {
             await pool.query("SET client_encoding = 'UTF8'");
             const res = await pool.query(
                 `SELECT joined_at, left_at, duration_minutes FROM voice_sessions 
                  WHERE user_id = $1 
-                   AND joined_at >= date_trunc('week', CURRENT_TIMESTAMP)`,
+                   AND joined_at >= date_trunc('week', CURRENT_TIMESTAMP)
+                 ORDER BY joined_at ASC`,
                 [userId]
             );
 
             const embed = new EmbedBuilder()
                 .setColor(0x3498DB)
                 .setTitle(`📊 WOCHEN-AKTIVITÄTSPROFIL: ${targetDisplayName}`)
-                .setDescription(`Statistische Verteilung der Voice-Präsenz in 30-Minuten-Blöcken (Aktuelle Kalenderwoche)`)
+                .setDescription(`Minutengenaue Übersicht der Voice-Präsenz (Aktuelle Kalenderwoche)`)
                 .setTimestamp();
 
             if (res.rows.length === 0) {
@@ -86,83 +87,50 @@ class StatsAnalysisManager {
             }
 
             const dayNames = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
-            const weeklyMatrix = {};
-            const weeklyMinutesPerDay = {}; // Speichert die echten Minuten pro Tag
-            
+            const sessionsPerDay = {};
+            const totalMinutesPerDay = {};
+
             dayNames.forEach(d => {
-                weeklyMatrix[d] = new Array(48).fill(0);
-                weeklyMinutesPerDay[d] = 0;
+                sessionsPerDay[d] = [];
+                totalMinutesPerDay[d] = 0;
             });
 
+            // Ordne jede Session dem jeweiligen Wochentag zu
             for (const row of res.rows) {
                 let start = new Date(row.joined_at);
                 let end = new Date(row.left_at);
-                let sessionDuration = row.duration_minutes || 0;
+                let duration = row.duration_minutes || 0;
 
-                // Ermittle den Wochentag des Session-Starts für die Minuten-Zuordnung
                 let jsDay = start.getDay();
                 let mappedDayIndex = jsDay === 0 ? 6 : jsDay - 1;
-                weeklyMinutesPerDay[dayNames[mappedDayIndex]] += sessionDuration;
+                let dayName = dayNames[mappedDayIndex];
 
-                // Raster-Aufteilung für die Visualisierung
-                let current = new Date(start);
-                while (current < end) {
-                    let currJsDay = current.getDay();
-                    let currMappedIndex = currJsDay === 0 ? 6 : currJsDay - 1;
-                    let dayName = dayNames[currMappedIndex];
+                // Formatiere Uhrzeiten (HH:MM)
+                let startTime = start.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+                let endTime = end.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
 
-                    let hours = current.getHours();
-                    let minutes = current.getMinutes();
-                    let slotIndex = hours * 2 + (minutes >= 30 ? 1 : 0);
-
-                    if (weeklyMatrix[dayName] && slotIndex >= 0 && slotIndex < 48) {
-                        weeklyMatrix[dayName][slotIndex]++;
-                    }
-
-                    current.setTime(current.getTime() + 30 * 60 * 1000);
-                }
+                sessionsPerDay[dayName].push(`• ${startTime} - ${endTime} Uhr (${duration} Min.)`);
+                totalMinutesPerDay[dayName] += duration;
             }
 
             let hasActivity = false;
             for (const day of dayNames) {
-                const slots = weeklyMatrix[day];
-                const activeSlotsCount = slots.filter(val => val > 0).length;
-                const totalMinutesForDay = weeklyMinutesPerDay[day];
+                const sessions = sessionsPerDay[day];
+                const totalMinutes = totalMinutesPerDay[day];
 
-                if (activeSlotsCount > 0) {
+                if (sessions.length > 0) {
                     hasActivity = true;
-                    
-                    let timeLines = [];
-                    let rangeStart = null;
-                    for (let i = 0; i <= 48; i++) {
-                        let isActive = i < 48 && slots[i] > 0;
-                        if (isActive && rangeStart === null) {
-                            rangeStart = i;
-                        } else if (!isActive && rangeStart !== null) {
-                            let startHour = Math.floor(rangeStart / 2).toString().padStart(2, '0');
-                            let startMin = (rangeStart % 2 === 0) ? '00' : '30';
-                            let endHour = Math.floor(i / 2).toString().padStart(2, '0');
-                            let endMin = (i % 2 === 0) ? '00' : '30';
-                            
-                            timeLines.push(`• ${startHour}:${startMin} - ${endHour}:${endMin} Uhr`);
-                            rangeStart = null;
-                        }
-                    }
 
-                    let barLength = Math.min(10, Math.ceil((activeSlotsCount / 48) * 10));
-                    let bar = '█'.repeat(barLength) + '░'.repeat(10 - barLength);
-
-                    // Zeigt nun die exakte Minutensumme aus der DB anstelle von (Slots * 30)
                     embed.addFields({
-                        name: `📅 ${day}`,
-                        value: `[${bar}] ${totalMinutesForDay} Min. aktiv\n${timeLines.slice(0, 3).join('\n')}`,
+                        name: `📅 ${day} — Total: ${totalMinutes} Min.`,
+                        value: sessions.join('\n'),
                         inline: false
                     });
                 }
             }
 
             if (!hasActivity) {
-                embed.addFields({ name: 'Keine Aktivität', value: 'In dieser Woche wurden noch keine aktiven Blöcke aufgezeichnet.' });
+                embed.addFields({ name: 'Keine Aktivität', value: 'In dieser Woche wurden noch keine Sessions aufgezeichnet.' });
             }
 
             return embed;
