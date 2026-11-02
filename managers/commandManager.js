@@ -1,6 +1,7 @@
 // managers/commandManager.js
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const { pool } = require('../database');
+const statsAnalysisManager = require('./statsAnalysisManager');
 
 class CommandManager {
     constructor() {
@@ -11,13 +12,67 @@ class CommandManager {
         return [
             new SlashCommandBuilder().setName('sync_nicknames').setDescription('Aktualisiert Klassen-Nicknames').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('ranking_aries').setDescription('Zeigt das Voice-Ranking'),
-            new SlashCommandBuilder().setName('wochen_stats').setDescription('Zeigt Stammzeiten'),
+            new SlashCommandBuilder().setName('wochen_stats').setDescription('Zeigt die wöchentliche Aktivitäts-Matrix eines Users'),
             new SlashCommandBuilder().setName('save_channel_refs').setDescription('Speichert Kanal-Referenzen').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('reset_channel_refs').setDescription('Setzt Kanäle zurück').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         ];
     }
 
     async handleInteraction(interaction, client) {
+        // 1. Handle Modals (Eingabe des User-Namens für die wöchentlichen Stats)
+        if (interaction.isModalSubmit() && interaction.customId === 'modal_wochen_stats') {
+            await interaction.deferReply();
+            
+            const searchInput = interaction.fields.getTextInputValue('input_username').trim().toLowerCase();
+            
+            try {
+                // Hole alle Mitglieder, um den passenden User zu finden
+                await interaction.guild.members.fetch();
+                const members = interaction.guild.members.cache;
+                
+                let targetMember = null;
+                for (const [_, member] of members) {
+                    if (member.user.bot) continue;
+                    let displayName = (member.displayName || member.user.username)
+                        .replace(/^[🔴⚠️.]+/g, '')
+                        .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
+                        .trim()
+                        .toLowerCase();
+                    
+                    let username = member.user.username.toLowerCase();
+
+                    if (displayName.includes(searchInput) || username.includes(searchInput)) {
+                        targetMember = member;
+                        break;
+                    }
+                }
+
+                if (!targetMember) {
+                    await interaction.editReply(`❌ Es wurde kein Mitglied gefunden, das auf "**${searchInput}**" passt.`);
+                    return;
+                }
+
+                let cleanDisplayName = targetMember.displayName
+                    .replace(/^[🔴⚠️.]+/g, '')
+                    .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
+                    .trim();
+
+                // Generiere das Heatmap-Embed über den Analysis Manager
+                const embed = await statsAnalysisManager.generateWeeklyHeatmapEmbed(
+                    interaction.guild, 
+                    targetMember.id, 
+                    cleanDisplayName
+                );
+
+                await interaction.editReply({ embeds: [embed] });
+
+            } catch (err) {
+                console.error("❌ [MODAL ERROR]:", err);
+                await interaction.editReply(`❌ Ein Fehler ist bei der Auswertung aufgetreten: ${err.message}`);
+            }
+            return;
+        }
+
         if (!interaction.isChatInputCommand()) return;
 
         console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
@@ -27,14 +82,11 @@ class CommandManager {
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 
-                // Erzwinge UTF-8 Client-Encoding für die Session
                 await pool.query("SET client_encoding = 'UTF8'");
 
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
                 let count = 0;
 
-                // Bekannte Problem-Kanäle, bei denen Discord den Bytestream für Bots beschädigt, 
-                // direkt als sauberes Unicode hinterlegen (der Rest läuft dynamisch).
                 const manualOverrides = {
                     "1558396597702889522": "👑 | Lead Meeting",
                     "1558396122580390019": "💤 | AFK",
@@ -45,7 +97,6 @@ class CommandManager {
                 for (const [_, channel] of channels) {
                     let cleanName;
 
-                    // Prüfen, ob für diesen Kanal ein Override existiert, sonst dynamisch verarbeiten
                     if (manualOverrides[channel.id]) {
                         cleanName = manualOverrides[channel.id];
                     } else {
@@ -53,7 +104,6 @@ class CommandManager {
                         cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
                     }
 
-                    // Base64-Transport zur absolut sicheren DB-Übergabe
                     let base64Name = Buffer.from(cleanName, 'utf8').toString('base64');
 
                     await pool.query(
@@ -99,7 +149,7 @@ class CommandManager {
                 }
                 await interaction.editReply(`✅ **${resetCount}** von ${result.rows.length} Sprachkanälen wurden zurückgesetzt!`);
             }
-            // Befehl zur Anzeige des Voice-Rankings (Gruppierung strikt über user_id)
+            // Befehl zur Anzeige des Voice-Rankings
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
                 
@@ -138,42 +188,21 @@ class CommandManager {
                 }
                 await interaction.editReply({ embeds: [embed] });
             }
-            // Befehl zur Anzeige der wöchentlichen/allgemeinen Stammzeiten (Gruppierung strikt über user_id)
+            // Neuer Befehl: /wochen_stats öffnet nun das Modal zur User-Auswahl
             else if (interaction.commandName === 'wochen_stats') {
-                await interaction.deferReply();
-                
-                const result = await pool.query(`SELECT user_id, SUM(duration_minutes) as total_minutes, COUNT(id) as sessions_count FROM voice_sessions GROUP BY user_id ORDER BY total_minutes DESC LIMIT 15`);
-                const embed = new EmbedBuilder()
-                    .setColor(0x3498DB)
-                    .setTitle('📊 COMMUNITY STAMMZEITEN (Gesamtübersicht)')
-                    .setTimestamp();
+                const modal = new ModalBuilder()
+                    .setCustomId('modal_wochen_stats')
+                    .setTitle('📊 Wochen-Aktivitätsstatistik');
 
-                if (result.rows.length === 0) {
-                    embed.setDescription('Es liegen noch keine aufgezeichneten Stammzeiten vor.');
-                } else {
-                    let desc = 'Übersicht der erfassten Sprachkanal-Präsenzen:\n\n';
-                    for (let i = 0; i < result.rows.length; i++) {
-                        const row = result.rows[i];
-                        
-                        let displayName = `Unbekannter User (${row.user_id})`;
-                        try {
-                            const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
-                            if (member) {
-                                displayName = member.displayName
-                                    .replace(/^[🔴⚠️.]+/g, '')
-                                    .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
-                                    .trim();
-                            }
-                        } catch (err) {}
+                const userInput = new TextInputBuilder()
+                    .setCustomId('input_username')
+                    .setLabel('Name oder Suchbegriff des Mitglieds')
+                    .setPlaceholder('z.B. Cyrill oder Murdock')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true);
 
-                        const h = Math.floor(row.total_minutes / 60);
-                        const m = row.total_minutes % 60;
-
-                        desc += `👤 **${displayName}** — ⏱️ **${h}h ${m}m** (${row.total_minutes} Min. in ${row.sessions_count} Sessions)\n`;
-                    }
-                    embed.setDescription(desc);
-                }
-                await interaction.editReply({ embeds: [embed] });
+                modal.addComponents(new ActionRowBuilder().addComponents(userInput));
+                await interaction.showModal(modal);
             }
             // Befehl zur Synchronisation der Klassen-Nicknames
             else if (interaction.commandName === 'sync_nicknames') {
