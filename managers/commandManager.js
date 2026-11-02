@@ -1,5 +1,5 @@
 // managers/commandManager.js
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, UserSelectMenuBuilder } = require('discord.js');
 const { pool } = require('../database');
 const statsAnalysisManager = require('./statsAnalysisManager');
 
@@ -12,43 +12,24 @@ class CommandManager {
         return [
             new SlashCommandBuilder().setName('sync_nicknames').setDescription('Aktualisiert Klassen-Nicknames').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('ranking_aries').setDescription('Zeigt das Voice-Ranking'),
-            new SlashCommandBuilder().setName('wochen_stats').setDescription('Zeigt die wöchentliche Aktivitäts-Matrix eines Users'),
+            new SlashCommandBuilder().setName('wochen_stats').setDescription('Wählt ein Mitglied für die wöchentliche Aktivitäts-Matrix aus'),
             new SlashCommandBuilder().setName('save_channel_refs').setDescription('Speichert Kanal-Referenzen').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('reset_channel_refs').setDescription('Setzt Kanäle zurück').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         ];
     }
 
     async handleInteraction(interaction, client) {
-        // 1. Handle Modals (Eingabe des User-Namens für die wöchentlichen Stats)
-        if (interaction.isModalSubmit() && interaction.customId === 'modal_wochen_stats') {
-            await interaction.deferReply();
+        // 1. Handle User Select Menu (Auswahl aus dem Dropdown)
+        if (interaction.isUserSelectMenu() && interaction.customId === 'select_wochen_stats_user') {
+            await interaction.deferUpdate(); // Nachricht temporär auf "lädt" setzen
             
-            const searchInput = interaction.fields.getTextInputValue('input_username').trim().toLowerCase();
+            const selectedUserId = interaction.values[0];
             
             try {
-                // Hole alle Mitglieder, um den passenden User zu finden
-                await interaction.guild.members.fetch();
-                const members = interaction.guild.members.cache;
-                
-                let targetMember = null;
-                for (const [_, member] of members) {
-                    if (member.user.bot) continue;
-                    let displayName = (member.displayName || member.user.username)
-                        .replace(/^[🔴⚠️.]+/g, '')
-                        .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
-                        .trim()
-                        .toLowerCase();
-                    
-                    let username = member.user.username.toLowerCase();
-
-                    if (displayName.includes(searchInput) || username.includes(searchInput)) {
-                        targetMember = member;
-                        break;
-                    }
-                }
+                const targetMember = await interaction.guild.members.fetch(selectedUserId).catch(() => null);
 
                 if (!targetMember) {
-                    await interaction.editReply(`❌ Es wurde kein Mitglied gefunden, das auf "**${searchInput}**" passt.`);
+                    await interaction.editReply({ content: `❌ Das ausgewählte Mitglied konnte nicht gefunden werden.`, components: [], embeds: [] });
                     return;
                 }
 
@@ -64,11 +45,12 @@ class CommandManager {
                     cleanDisplayName
                 );
 
-                await interaction.editReply({ embeds: [embed] });
+                // Ersetze das Dropdown durch die fertige Statistik
+                await interaction.editReply({ embeds: [embed], components: [] });
 
             } catch (err) {
-                console.error("❌ [MODAL ERROR]:", err);
-                await interaction.editReply(`❌ Ein Fehler ist bei der Auswertung aufgetreten: ${err.message}`);
+                console.error("❌ [SELECT MENU ERROR]:", err);
+                await interaction.editReply({ content: `❌ Ein Fehler ist bei der Auswertung aufgetreten: ${err.message}`, components: [], embeds: [] });
             }
             return;
         }
@@ -188,21 +170,21 @@ class CommandManager {
                 }
                 await interaction.editReply({ embeds: [embed] });
             }
-            // Neuer Befehl: /wochen_stats öffnet nun das Modal zur User-Auswahl
+            // /wochen_stats sendet nun ein Dropdown (User Select Menu)
             else if (interaction.commandName === 'wochen_stats') {
-                const modal = new ModalBuilder()
-                    .setCustomId('modal_wochen_stats')
-                    .setTitle('📊 Wochen-Aktivitätsstatistik');
+                const selectMenu = new UserSelectMenuBuilder()
+                    .setCustomId('select_wochen_stats_user')
+                    .setPlaceholder('Wähle ein Mitglied für die Wochen-Statistik aus...')
+                    .setMinValues(1)
+                    .setMaxValues(1);
 
-                const userInput = new TextInputBuilder()
-                    .setCustomId('input_username')
-                    .setLabel('Name oder Suchbegriff des Mitglieds')
-                    .setPlaceholder('z.B. Cyrill oder Murdock')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true);
+                const row = new ActionRowBuilder().addComponents(selectMenu);
 
-                modal.addComponents(new ActionRowBuilder().addComponents(userInput));
-                await interaction.showModal(modal);
+                await interaction.reply({
+                    content: '📊 Bitte wähle das gewünschte Mitglied aus der Liste aus:',
+                    components: [row],
+                    flags: [64] // Nur für den User sichtbar (ephemeral)
+                });
             }
             // Befehl zur Synchronisation der Klassen-Nicknames
             else if (interaction.commandName === 'sync_nicknames') {
