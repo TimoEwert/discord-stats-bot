@@ -54,7 +54,7 @@ class StatsAnalysisManager {
                 components: [] 
             });
 
-        } chron (err) { // Korrigiert zu catch
+        } catch (err) {
             console.error("❌ [SELECT MENU ERROR]:", err);
             await interaction.editReply({ content: `❌ Ein Fehler ist bei der Auswertung aufgetreten: ${err.message}`, components: [], embeds: [] });
         }
