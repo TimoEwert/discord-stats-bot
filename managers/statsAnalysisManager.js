@@ -1,5 +1,5 @@
 // managers/statsAnalysisManager.js
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, UserSelectMenuBuilder } = require('discord.js');
 const { pool } = require('../database');
 
 class StatsAnalysisManager {
@@ -7,10 +7,64 @@ class StatsAnalysisManager {
         this.name = "StatsAnalysisManager";
     }
 
-    // Hilfsfunktion: Berechnet die Aktivitäts-Matrix für die aktuelle Woche eines Users
+    // Sendet das Dropdown-Menü öffentlich in den Channel
+    async sendSelectMenu(interaction) {
+        const selectMenu = new UserSelectMenuBuilder()
+            .setCustomId('select_wochen_stats_user')
+            .setPlaceholder('Wähle ein Mitglied für die Wochen-Statistik aus...')
+            .setMinValues(1)
+            .setMaxValues(1);
+
+        const row = new ActionRowBuilder().addComponents(selectMenu);
+
+        await interaction.reply({
+            content: '📊 Bitte wähle das gewünschte Mitglied aus der Liste aus:',
+            components: [row]
+        });
+    }
+
+    // Verarbeitet die Auswahl aus dem Dropdown und sendet das Ergebnis öffentlich
+    async handleSelectMenu(interaction) {
+        await interaction.deferUpdate(); // Ursprüngliche Nachricht aktualisieren
+        
+        const selectedUserId = interaction.values[0];
+        
+        try {
+            const targetMember = await interaction.guild.members.fetch(selectedUserId).catch(() => null);
+
+            if (!targetMember) {
+                await interaction.editReply({ content: `❌ Das ausgewählte Mitglied konnte nicht gefunden werden.`, components: [], embeds: [] });
+                return;
+            }
+
+            let cleanDisplayName = targetMember.displayName
+                .replace(/^[🔴⚠️.]+/g, '')
+                .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
+                .trim();
+
+            // Generiere das Heatmap-Embed für die aktuelle Woche
+            const embed = await this.generateWeeklyHeatmapEmbed(
+                interaction.guild, 
+                targetMember.id, 
+                cleanDisplayName
+            );
+
+            // Dropdown entfernen und Statistik öffentlich posten
+            await interaction.editReply({ 
+                content: `📊 Wochen-Aktivitätsstatistik für **${cleanDisplayName}** (angefordert von <@${interaction.user.id}>):`, 
+                embeds: [embed], 
+                components: [] 
+            });
+
+        } catch (err) {
+            console.error("❌ [SELECT MENU ERROR]:", err);
+            await interaction.editReply({ content: `❌ Ein Fehler ist bei der Auswertung aufgetreten: ${err.message}`, components: [], embeds: [] });
+        }
+    }
+
+    // Berechnet die Aktivitäts-Matrix für die aktuelle Woche eines Users
     async generateWeeklyHeatmapEmbed(guild, userId, targetDisplayName) {
         try {
-            // 1. Hole alle Voice-Sessions des Users für die laufende Woche (ab Montag 00:00 Uhr)
             await pool.query("SET client_encoding = 'UTF8'");
             const res = await pool.query(
                 `SELECT joined_at, left_at FROM voice_sessions 
@@ -33,28 +87,22 @@ class StatsAnalysisManager {
                 return embed;
             }
 
-            // 2. Initialisiere ein Raster für Wochentage (1 = Montag bis 7 = Sonntag) und 30-Minuten-Slots (0 bis 47)
-            // Wochentag in JS: 0=So, 1=Mo, 2=Di, 3=Mi, 4=Do, 5=Fr, 6=Sa -> Wir mappen das sauber auf Mo-So.
             const dayNames = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
             const weeklyMatrix = {};
             dayNames.forEach(d => {
-                weeklyMatrix[d] = new Array(48).fill(0); // 48 Blöcke à 30 Minuten am Tag
+                weeklyMatrix[d] = new Array(48).fill(0);
             });
 
-            // 3. Jede Session in die 30-Minuten-Slots aufteilen
             for (const row of res.rows) {
                 let start = new Date(row.joined_at);
                 let end = new Date(row.left_at);
 
-                // Iteriere minutengenau oder in 30-Minuten-Schritten durch die Session
                 let current = new Date(start);
                 while (current < end) {
-                    // Wochentag ermitteln (JS getDay(): 0=So, 1=Mo ...)
                     let jsDay = current.getDay();
-                    let mappedDayIndex = jsDay === 0 ? 6 : jsDay - 1; // Mo=0 ... So=6
+                    let mappedDayIndex = jsDay === 0 ? 6 : jsDay - 1;
                     let dayName = dayNames[mappedDayIndex];
 
-                    // Slot des Tages berechnen (0 bis 47)
                     let hours = current.getHours();
                     let minutes = current.getMinutes();
                     let slotIndex = hours * 2 + (minutes >= 30 ? 1 : 0);
@@ -63,12 +111,10 @@ class StatsAnalysisManager {
                         weeklyMatrix[dayName][slotIndex]++;
                     }
 
-                    // 30 Minuten weitergehen
                     current.setTime(current.getTime() + 30 * 60 * 1000);
                 }
             }
 
-            // 4. Text-Visualisierung für Tage mit Aktivität aufbauen
             let hasActivity = false;
             for (const day of dayNames) {
                 const slots = weeklyMatrix[day];
@@ -77,11 +123,7 @@ class StatsAnalysisManager {
                 if (activeSlotsCount > 0) {
                     hasActivity = true;
                     
-                    // Finde Hauptzeiten (Peak-Blöcke)
-                    let maxVal = Math.max(...slots);
                     let timeLines = [];
-
-                    // Wir fassen benachbarte aktive Slots zu Zeitbereichen zusammen
                     let rangeStart = null;
                     for (let i = 0; i <= 48; i++) {
                         let isActive = i < 48 && slots[i] > 0;
@@ -98,7 +140,6 @@ class StatsAnalysisManager {
                         }
                     }
 
-                    // Visueller Minibalken als Indikator
                     let barLength = Math.min(10, Math.ceil((activeSlotsCount / 48) * 10));
                     let bar = '█'.repeat(barLength) + '░'.repeat(10 - barLength);
 
