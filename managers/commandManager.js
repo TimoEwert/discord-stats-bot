@@ -1,5 +1,5 @@
 // managers/commandManager.js
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, UserSelectMenuBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { pool } = require('../database');
 const statsAnalysisManager = require('./statsAnalysisManager');
 
@@ -12,46 +12,16 @@ class CommandManager {
         return [
             new SlashCommandBuilder().setName('sync_nicknames').setDescription('Aktualisiert Klassen-Nicknames').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('ranking_aries').setDescription('Zeigt das Voice-Ranking'),
-            new SlashCommandBuilder().setName('wochen_stats').setDescription('Wählt ein Mitglied für die wöchentliche Aktivitäts-Matrix aus'),
+            new SlashCommandBuilder().setName('wochen_stats').setDescription('Öffnet die wöchentliche Aktivitäts-Matrix eines Users'),
             new SlashCommandBuilder().setName('save_channel_refs').setDescription('Speichert Kanal-Referenzen').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('reset_channel_refs').setDescription('Setzt Kanäle zurück').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         ];
     }
 
     async handleInteraction(interaction, client) {
-        // 1. Handle User Select Menu (Auswahl aus dem Dropdown)
+        // Dropdown-Auswahl an den Analysis Manager delegieren
         if (interaction.isUserSelectMenu() && interaction.customId === 'select_wochen_stats_user') {
-            await interaction.deferUpdate(); // Nachricht temporär auf "lädt" setzen
-            
-            const selectedUserId = interaction.values[0];
-            
-            try {
-                const targetMember = await interaction.guild.members.fetch(selectedUserId).catch(() => null);
-
-                if (!targetMember) {
-                    await interaction.editReply({ content: `❌ Das ausgewählte Mitglied konnte nicht gefunden werden.`, components: [], embeds: [] });
-                    return;
-                }
-
-                let cleanDisplayName = targetMember.displayName
-                    .replace(/^[🔴⚠️.]+/g, '')
-                    .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
-                    .trim();
-
-                // Generiere das Heatmap-Embed über den Analysis Manager
-                const embed = await statsAnalysisManager.generateWeeklyHeatmapEmbed(
-                    interaction.guild, 
-                    targetMember.id, 
-                    cleanDisplayName
-                );
-
-                // Ersetze das Dropdown durch die fertige Statistik
-                await interaction.editReply({ embeds: [embed], components: [] });
-
-            } catch (err) {
-                console.error("❌ [SELECT MENU ERROR]:", err);
-                await interaction.editReply({ content: `❌ Ein Fehler ist bei der Auswertung aufgetreten: ${err.message}`, components: [], embeds: [] });
-            }
+            await statsAnalysisManager.handleSelectMenu(interaction);
             return;
         }
 
@@ -60,10 +30,8 @@ class CommandManager {
         console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
 
         try {
-            // Befehl zum Speichern der aktuellen Sprachkanal-Namen
             if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
-                
                 await pool.query("SET client_encoding = 'UTF8'");
 
                 const channels = interaction.guild.channels.cache.filter(c => c.isVoiceBased());
@@ -77,15 +45,7 @@ class CommandManager {
                 };
 
                 for (const [_, channel] of channels) {
-                    let cleanName;
-
-                    if (manualOverrides[channel.id]) {
-                        cleanName = manualOverrides[channel.id];
-                    } else {
-                        let rawName = channel.name.normalize('NFC');
-                        cleanName = rawName.replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
-                    }
-
+                    let cleanName = manualOverrides[channel.id] || channel.name.normalize('NFC').replace(/^[🔴⚠️]+/, '').replace(/\s+ging$/, '').trim();
                     let base64Name = Buffer.from(cleanName, 'utf8').toString('base64');
 
                     await pool.query(
@@ -97,19 +57,15 @@ class CommandManager {
                     );
                     count++;
                 }
-                console.log(`✅ [DB SAVE] ${count} Kanal-Referenzen erfolgreich gespeichert.`);
                 await interaction.editReply(`✅ **${count}** Sprachkanal-Referenzen erfolgreich gespeichert!`);
             }
-            // Befehl zum Zurücksetzen der Sprachkanäle
             else if (interaction.commandName === 'reset_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
-                
                 await pool.query("SET client_encoding = 'UTF8'");
                 const result = await pool.query(`SELECT channel_id, original_name FROM channel_references`);
-                console.log(`🔍 [DB QUERY] Gefundene Kanal-Referenzen in DB: ${result.rows.length}`);
 
                 if (result.rows.length === 0) {
-                    await interaction.editReply(`❌ Keine Kanal-Referenzen in der Datenbank gefunden. Bitte zuerst /save_channel_refs ausführen.`);
+                    await interaction.editReply(`❌ Keine Kanal-Referenzen gefunden. Bitte zuerst /save_channel_refs ausführen.`);
                     return;
                 }
 
@@ -119,22 +75,15 @@ class CommandManager {
                     if (channel && channel.isVoiceBased()) {
                         try {
                             await channel.setName(row.original_name);
-                            console.log(`✨ [RESET SUCCESS] Kanal ID ${row.channel_id} auf '${row.original_name}' zurückgesetzt.`);
                             resetCount++;
-                        } catch (apiErr) {
-                            console.error(`❌ [DISCORD API ERROR] Konnte Kanal ${row.channel_id} (${row.original_name}) nicht umbenennen:`, apiErr.message);
-                        }
+                        } catch (apiErr) {}
                         await new Promise(r => setTimeout(r, 300));
-                    } else {
-                        console.log(`⚠️ [RESET SKIP] Kanal ID ${row.channel_id} nicht im Cache gefunden oder kein Voice-Kanal.`);
                     }
                 }
-                await interaction.editReply(`✅ **${resetCount}** von ${result.rows.length} Sprachkanälen wurden zurückgesetzt!`);
+                await interaction.editReply(`✅ **${resetCount}** von ${result.rows.length} Sprachkanälen zurückgesetzt!`);
             }
-            // Befehl zur Anzeige des Voice-Rankings
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
-                
                 const result = await pool.query(`SELECT user_id, SUM(duration_minutes) as total_minutes FROM voice_sessions GROUP BY user_id ORDER BY total_minutes DESC LIMIT 10`);
                 const embed = new EmbedBuilder().setColor(0x00AE86).setTitle('🏆 ARIES COMMUNITY - VOICE RANKING').setTimestamp();
                 
@@ -144,25 +93,17 @@ class CommandManager {
                     let desc = '';
                     for (let i = 0; i < result.rows.length; i++) {
                         const row = result.rows[i];
-                        
                         let displayName = `Unbekannter User (${row.user_id})`;
                         try {
                             const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
                             if (member) {
-                                displayName = member.displayName
-                                    .replace(/^[🔴⚠️.]+/g, '')
-                                    .replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '')
-                                    .trim();
+                                displayName = member.displayName.replace(/^[🔴⚠️.]+/g, '').replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '').trim();
                             }
                         } catch (err) {}
 
                         const h = Math.floor(row.total_minutes / 60);
                         const m = row.total_minutes % 60;
-                        
-                        let medal = `#${i + 1}`;
-                        if (i === 0) medal = '🥇';
-                        if (i === 1) medal = '🥈';
-                        if (i === 2) medal = '🥉';
+                        let medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
                         
                         desc += `${medal} **${displayName}** — 🎙️ **${h}h ${m}m** (${row.total_minutes} Min.)\n`;
                     }
@@ -170,30 +111,16 @@ class CommandManager {
                 }
                 await interaction.editReply({ embeds: [embed] });
             }
-            // /wochen_stats sendet nun ein Dropdown (User Select Menu)
+            // Befehl leitet das Öffnen des Dropdowns an den Analysis Manager weiter
             else if (interaction.commandName === 'wochen_stats') {
-                const selectMenu = new UserSelectMenuBuilder()
-                    .setCustomId('select_wochen_stats_user')
-                    .setPlaceholder('Wähle ein Mitglied für die Wochen-Statistik aus...')
-                    .setMinValues(1)
-                    .setMaxValues(1);
-
-                const row = new ActionRowBuilder().addComponents(selectMenu);
-
-                await interaction.reply({
-                    content: '📊 Bitte wähle das gewünschte Mitglied aus der Liste aus:',
-                    components: [row],
-                    flags: [64] // Nur für den User sichtbar (ephemeral)
-                });
+                await statsAnalysisManager.sendSelectMenu(interaction);
             }
-            // Befehl zur Synchronisation der Klassen-Nicknames
             else if (interaction.commandName === 'sync_nicknames') {
                 await interaction.deferReply({ flags: [64] });
                 const members = await interaction.guild.members.fetch();
                 let updatedCount = 0;
                 
                 const nicknameManager = require('./nicknameManager');
-
                 for (const [_, member] of members) {
                     if (member.user.bot) continue;
                     const changed = await nicknameManager.updateMemberNickname(member, false);
