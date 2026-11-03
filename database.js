@@ -9,15 +9,15 @@ const pool = new Pool({
 });
 
 async function initDatabase() {
-    // 1. Live-Puffer für die aktuelle Woche (minutengenau)
+    // 1. Zentrale kumulative Statistik-Tabelle (Tag-, Wochen- und Monatsgenau)
     await pool.query(`
-        CREATE TABLE IF NOT EXISTS voice_sessions (
-            id SERIAL PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS user_time_stats (
             user_id TEXT NOT NULL,
-            joined_at TIMESTAMP NOT NULL,
-            left_at TIMESTAMP NOT NULL,
-            duration_seconds INT NOT NULL,
-            duration_minutes INT DEFAULT 0
+            stat_date DATE NOT NULL,
+            calendar_week INT NOT NULL,
+            year INT NOT NULL,
+            total_minutes INT NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, stat_date)
         )
     `);
     
@@ -31,32 +31,10 @@ async function initDatabase() {
         )
     `);
 
-    // 3. NEU: Wöchentliche Gesamtsummen (pro User, Jahr und Kalenderwoche)
-    await pool.query(`
-        CREATE TABLE IF NOT EXISTS week_times (
-            user_id TEXT NOT NULL,
-            year INT NOT NULL,
-            calendar_week INT NOT NULL,
-            total_minutes INT NOT NULL DEFAULT 0,
-            PRIMARY KEY (user_id, year, calendar_week)
-        )
-    `);
+    // Performance-Index für blitzschnelle Abfragen nach User, Jahr, KW und Datum
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_time_stats_lookup ON user_time_stats (user_id, year, calendar_week, stat_date)`);
 
-    // 4. NEU: Jährliche Gesamtsummen (pro User und Jahr)
-    await pool.query(`
-        CREATE TABLE IF NOT EXISTS year_times (
-            user_id TEXT NOT NULL,
-            year INT NOT NULL,
-            total_minutes INT NOT NULL DEFAULT 0,
-            PRIMARY KEY (user_id, year)
-        )
-    `);
-
-    // Indizes für maximale Performance bei Abfragen
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_week_times_user ON week_times (user_id, year, calendar_week)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_year_times_user ON year_times (user_id, year)`);
-
-    console.log(`✅ [DB] PostgreSQL Datenbank & alle Tabellen (inkl. week_times & year_times) erfolgreich initialisiert.`);
+    console.log(`✅ [DB] PostgreSQL Datenbank & kumulative Tabelle (user_time_stats) erfolgreich initialisiert.`);
 }
 
 module.exports = { pool, initDatabase };
