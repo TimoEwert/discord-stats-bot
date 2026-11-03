@@ -66,7 +66,7 @@ class StatsAnalysisManager {
                 { label: 'Wochen-Statistik (User wählen)', value: 'cmd_wochen', description: 'Detailansicht der aktuellen Woche', emoji: '📊' },
                 { label: 'Monats-Statistik (User wählen)', value: 'cmd_monat', description: 'Aggregierte Monatsübersicht', emoji: '📅' },
                 { label: 'Jahres-Statistik (User wählen)', value: 'cmd_jahr', description: 'Aggregierte Jahresübersicht', emoji: '🏆' },
-                { label: 'Heutige Voice-Präsenz (Alle)', value: 'cmd_heute', description: 'Übersicht wer heute aktiv war', emoji: '🎙️' }
+                { label: 'Heutige Voice-Präsenz (Alle)', value: 'cmd_heute', description: 'Übersicht wer heute aktiv war (mit Uhrzeiten)', emoji: '🎙️' }
             ]);
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -124,57 +124,70 @@ class StatsAnalysisManager {
         }
     }
 
-    // Heutige Stats direkt aus der Kumulativ-Tabelle
+    // Heutige Stats mit genauen Uhrzeiten (von wann bis wann) aus voice_sessions
     async showHeuteStats(interaction) {
         const isFromMenu = interaction.isStringSelectMenu && interaction.customId === 'select_admin_panel_action';
         if (!isFromMenu && !interaction.deferred && !interaction.replied) {
             await interaction.deferReply();
         }
 
-        const todayString = new Date().toISOString().split('T')[0];
-
         await pool.query("SET client_encoding = 'UTF8'");
+        
         const res = await pool.query(
-            `SELECT user_id, total_minutes FROM user_time_stats WHERE stat_date = $1 ORDER BY total_minutes DESC`,
-            [todayString]
+            `SELECT user_id, joined_at, left_at, duration_minutes 
+             FROM voice_sessions 
+             WHERE joined_at >= date_trunc('day', CURRENT_TIMESTAMP)
+             ORDER BY joined_at ASC`
         );
 
         const embed = new EmbedBuilder()
             .setColor(0x2ECC71)
-            .setTitle(`🎙️ HEUTIGE VOICE-AKTIVITÄT`)
-            .setDescription(`Übersicht aller Voice-Minuten des heutigen Tages`)
+            .setTitle(`🎙️ HEUTIGE VOICE-AKTIVITÄT (DETAILANSICHT)`)
+            .setDescription(`Übersicht aller heutigen Sprachkanal-Besuche mit genauen Uhrzeiten`)
             .setTimestamp();
 
         if (res.rows.length === 0) {
             embed.addFields({ name: 'Keine Aktivität', value: 'Heute gab es bisher noch keine erfassten Voice-Zeiten.' });
         } else {
-            let desc = '';
+            const userSessions = {};
             for (const row of res.rows) {
-                let displayName = `User ID: ${row.user_id}`;
+                if (!userSessions[row.user_id]) userSessions[row.user_id] = { intervals: [], total: 0 };
+                userSessions[row.user_id].total += row.duration_minutes;
+                
+                const timeFrom = new Date(row.joined_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                const timeTo = new Date(row.left_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                userSessions[row.user_id].intervals.push(`${timeFrom} - ${timeTo} Uhr (${row.duration_minutes} Min.)`);
+            }
+
+            for (const [userId, data] of Object.entries(userSessions)) {
+                let displayName = `User ID: ${userId}`;
                 try {
-                    const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
+                    const member = await interaction.guild.members.fetch(userId).catch(() => null);
                     if (member) {
                         displayName = member.displayName.replace(/^[🔴⚠️.]+/g, '').replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '').trim();
                     }
                 } catch (e) {}
 
-                const h = Math.floor(row.total_minutes / 60);
-                const m = row.total_minutes % 60;
-                desc += `• **${displayName}** — 🎙️ **${h}h ${m}m** (${row.total_minutes} Min.)\n`;
+                const h = Math.floor(data.total / 60);
+                const m = data.total % 60;
+
+                embed.addFields({
+                    name: `👤 ${displayName} (Gesamt: ${h}h ${m}m)`,
+                    value: data.intervals.map(i => `• ${i}`).join('\n'),
+                    inline: false
+                });
             }
-            embed.setDescription(desc);
         }
 
         if (isFromMenu) {
-            await interaction.followUp({ content: '🎙️ **Heutige Voice-Präsenz:**', embeds: [embed], flags: [64] });
+            await interaction.followUp({ content: '🎙️ **Heutige Voice-Präsenz (Detail):**', embeds: [embed], flags: [64] });
         } else {
             await interaction.editReply({ embeds: [embed] });
         }
     }
 
-    // Wochen-Statistik (Aktuelle KW)
+    // Wochen-Statistik (Aktuelle KW) aus user_time_stats
     async generateWeeklyStatsEmbed(userId, targetDisplayName) {
-        // Berechne aktuelle KW und Jahr
         const now = new Date();
         const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
         const dayNum = d.getUTCDay() || 7;
@@ -213,7 +226,7 @@ class StatsAnalysisManager {
         return embed;
     }
 
-    // Monats-Statistik (Aktueller Monat)
+    // Monats-Statistik (Aktueller Monat) aus user_time_stats
     async generateMonthlyStatsEmbed(userId, targetDisplayName) {
         const res = await pool.query(
             `SELECT SUM(total_minutes) as total FROM user_time_stats 
@@ -234,7 +247,7 @@ class StatsAnalysisManager {
             .setTimestamp();
     }
 
-    // Jahres-Statistik (Laufendes Jahr)
+    // Jahres-Statistik (Laufendes Jahr) aus user_time_stats
     async generateYearlyStatsEmbed(userId, targetDisplayName) {
         const res = await pool.query(
             `SELECT SUM(total_minutes) as total FROM user_time_stats 
