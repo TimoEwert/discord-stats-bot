@@ -2,6 +2,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { pool } = require('../database');
 const statsAnalysisManager = require('./statsAnalysisManager');
+const nicknameManager = require('./nicknameManager');
 
 class CommandManager {
     constructor() {
@@ -10,17 +11,21 @@ class CommandManager {
 
     getCommandBuilders() {
         return [
+            new SlashCommandBuilder().setName('wochen_stats').setDescription('Öffnet die wöchentliche Detail-Matrix eines Users'),
+            new SlashCommandBuilder().setName('monats_stats').setDescription('Öffnet die Monatsübersicht eines Users'),
+            new SlashCommandBuilder().setName('jahres_stats').setDescription('Öffnet die Jahresübersicht eines Users'),
+            new SlashCommandBuilder().setName('heute').setDescription('Zeigt wer heute im Sprachkanal war'),
+            new SlashCommandBuilder().setName('stats').setDescription('Öffnet das Adminpanel für Statistiken').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('sync_nicknames').setDescription('Aktualisiert Klassen-Nicknames').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('ranking_aries').setDescription('Zeigt das Voice-Ranking'),
-            new SlashCommandBuilder().setName('wochen_stats').setDescription('Öffnet die wöchentliche Aktivitäts-Matrix eines Users'),
             new SlashCommandBuilder().setName('save_channel_refs').setDescription('Speichert Kanal-Referenzen').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('reset_channel_refs').setDescription('Setzt Kanäle zurück').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         ];
     }
 
     async handleInteraction(interaction, client) {
-        // Dropdown-Auswahl an den Analysis Manager delegieren
-        if (interaction.isUserSelectMenu() && interaction.customId === 'select_wochen_stats_user') {
+        // Interaktionen aus Dropdowns (User-Select & String-Select) direkt an den Analysis Manager übergeben
+        if (interaction.isStringSelectMenu() || interaction.isUserSelectMenu()) {
             await statsAnalysisManager.handleSelectMenu(interaction);
             return;
         }
@@ -30,7 +35,24 @@ class CommandManager {
         console.log(`🤖 [COMMAND] Befehl empfangen: /${interaction.commandName} von User ${interaction.user.tag}`);
 
         try {
-            if (interaction.commandName === 'save_channel_refs') {
+            // Neue Statistik-Befehle an den statsAnalysisManager delegieren
+            if (interaction.commandName === 'wochen_stats') {
+                await statsAnalysisManager.sendWochenStatsMenu(interaction);
+            }
+            else if (interaction.commandName === 'monats_stats') {
+                await statsAnalysisManager.sendMonatsStatsMenu(interaction);
+            }
+            else if (interaction.commandName === 'jahres_stats') {
+                await statsAnalysisManager.sendJahresStatsMenu(interaction);
+            }
+            else if (interaction.commandName === 'heute') {
+                await statsAnalysisManager.showHeuteStats(interaction);
+            }
+            else if (interaction.commandName === 'stats') {
+                await statsAnalysisManager.sendAdminPanel(interaction);
+            }
+            // Bestehende Befehle
+            else if (interaction.commandName === 'save_channel_refs') {
                 await interaction.deferReply({ flags: [64] });
                 await pool.query("SET client_encoding = 'UTF8'");
 
@@ -111,16 +133,11 @@ class CommandManager {
                 }
                 await interaction.editReply({ embeds: [embed] });
             }
-            // Befehl leitet das Öffnen des Dropdowns an den Analysis Manager weiter
-            else if (interaction.commandName === 'wochen_stats') {
-                await statsAnalysisManager.sendSelectMenu(interaction);
-            }
             else if (interaction.commandName === 'sync_nicknames') {
                 await interaction.deferReply({ flags: [64] });
                 const members = await interaction.guild.members.fetch();
                 let updatedCount = 0;
                 
-                const nicknameManager = require('./nicknameManager');
                 for (const [_, member] of members) {
                     if (member.user.bot) continue;
                     const changed = await nicknameManager.updateMemberNickname(member, false);
