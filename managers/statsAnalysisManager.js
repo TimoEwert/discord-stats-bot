@@ -17,10 +17,16 @@ class StatsAnalysisManager {
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
 
-        await interaction.reply({
+        const payload = {
             content: '📊 Bitte wähle das gewünschte Mitglied für die Wochen-Ansicht aus:',
             components: [row]
-        });
+        };
+
+        if (interaction.isStringSelectMenu() || interaction.deferred || interaction.replied) {
+            await interaction.followUp({ ...payload, flags: [64] });
+        } else {
+            await interaction.reply(payload);
+        }
     }
 
     // 2. Dropdown für Monats-Stats (User-Auswahl)
@@ -33,10 +39,16 @@ class StatsAnalysisManager {
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
 
-        await interaction.reply({
+        const payload = {
             content: '📅 Bitte wähle das gewünschte Mitglied für die Monats-Ansicht aus:',
             components: [row]
-        });
+        };
+
+        if (interaction.isStringSelectMenu() || interaction.deferred || interaction.replied) {
+            await interaction.followUp({ ...payload, flags: [64] });
+        } else {
+            await interaction.reply(payload);
+        }
     }
 
     // 3. Dropdown für Jahres-Stats (User-Auswahl)
@@ -49,10 +61,16 @@ class StatsAnalysisManager {
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
 
-        await interaction.reply({
+        const payload = {
             content: '🏆 Bitte wähle das gewünschte Mitglied für die Jahres-Ansicht aus:',
             components: [row]
-        });
+        };
+
+        if (interaction.isStringSelectMenu() || interaction.deferred || interaction.replied) {
+            await interaction.followUp({ ...payload, flags: [64] });
+        } else {
+            await interaction.reply(payload);
+        }
     }
 
     // 4. Adminpanel /stats mit Funktions-Dropdown
@@ -72,7 +90,7 @@ class StatsAnalysisManager {
         await interaction.reply({
             content: '⚙️ **Aries Stats Adminpanel**\nWähle unten die gewünschte Auswertung aus:',
             components: [row],
-            flags: [64] // Adminpanel nur für den Admin sichtbar
+            flags: [64]
         });
     }
 
@@ -125,16 +143,14 @@ class StatsAnalysisManager {
         }
     }
 
-    // /heute Befehl: Wer war heute in welchem Channel?
+    // /heute Befehl
     async showHeuteStats(interaction) {
-        // Falls vom Adminpanel aufgerufen, ist interaction ein SelectMenuInteraction (hat update statt reply)
         const isFromMenu = interaction.isStringSelectMenu && interaction.customId === 'select_admin_panel_action';
         if (!isFromMenu && !interaction.deferred && !interaction.replied) {
             await interaction.deferReply();
         }
 
         await pool.query("SET client_encoding = 'UTF8'");
-        // Holt Sessions die heute gestartet sind oder heute aktiv waren
         const res = await pool.query(
             `SELECT user_id, joined_at, left_at, duration_minutes 
              FROM voice_sessions 
@@ -151,7 +167,6 @@ class StatsAnalysisManager {
         if (res.rows.length === 0) {
             embed.addFields({ name: 'Keine Aktivität', value: 'Heute gab es bisher noch keine erfassten Voice-Sessions.' });
         } else {
-            // Gruppiere nach User
             const userSessions = {};
             for (const row of res.rows) {
                 if (!userSessions[row.user_id]) userSessions[row.user_id] = [];
@@ -178,13 +193,13 @@ class StatsAnalysisManager {
         }
 
         if (isFromMenu) {
-            await interaction.editReply({ content: '🎙️ **Heutige Voice-Präsenz:**', embeds: [embed], components: [] });
+            await interaction.followUp({ content: '🎙️ **Heutige Voice-Präsenz:**', embeds: [embed], flags: [64] });
         } else {
             await interaction.editReply({ embeds: [embed] });
         }
     }
 
-    // Wochen-Details (minutengenau für aktuelle Woche)
+    // Wochen-Details (minutengenau aus voice_sessions für die aktuelle Woche)
     async generateWeeklyHeatmapEmbed(guild, userId, targetDisplayName) {
         const res = await pool.query(
             `SELECT joined_at, left_at, duration_minutes FROM voice_sessions 
@@ -237,44 +252,59 @@ class StatsAnalysisManager {
         return embed;
     }
 
-    // Monats-Statistik (aus der schlanken Aggregat-Tabelle)
+    // Monats-Statistik (aus week_times für den aktuellen Monat)
     async generateMonthlyStatsEmbed(userId, targetDisplayName) {
+        // Ermittelt das aktuelle Jahr und den Monat, um die Wochensummen aus week_times zu aggregieren
         const res = await pool.query(
-            `SELECT SUM(total_minutes) as total FROM daily_user_stats 
+            `SELECT SUM(total_minutes) as total FROM week_times 
              WHERE user_id = $1 
-               AND stat_date >= date_trunc('month', CURRENT_TIMESTAMP)`,
+               AND year = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)
+               -- Filter für Wochen, die in den aktuellen Monat fallen (grob über ISO-Wochen / Datum)
+               `,
             [userId]
         );
 
-        const totalMins = res.rows[0].total || 0;
+        // Alternativ oder ergänzend: Da week_times Kalenderwochen speichert, summieren wir hier über die Wochen des Monats
+        const resMonth = await pool.query(
+            `SELECT SUM(wt.total_minutes) as total 
+             FROM week_times wt
+             JOIN (
+                 SELECT DISTINCT EXTRACT(WEEK FROM d)::int as cw, EXTRACT(YEAR FROM d)::int as yr
+                 FROM generate_series(date_trunc('month', CURRENT_TIMESTAMP), date_trunc('month', CURRENT_TIMESTAMP) + INTERVAL '1 month - 1 day', INTERVAL '1 day') d
+             ) m ON wt.calendar_week = m.cw AND wt.year = m.yr
+             WHERE wt.user_id = $1`,
+            [userId]
+        );
+
+        const totalMins = resMonth.rows[0].total || 0;
         const h = Math.floor(totalMins / 60);
         const m = totalMins % 60;
 
         return new EmbedBuilder()
             .setColor(0x9B59B6)
             .setTitle(`📅 MONATS-STATISTIK: ${targetDisplayName}`)
-            .setDescription(`Gesamte Voice-Präsenz im aktuellen Kalendermonat`)
+            .setDescription(`Gesamte Voice-Präsenz im aktuellen Kalendermonat (aus week_times)`)
             .addFields({ name: 'Gesamtzeit', value: `🎙️ **${h}h ${m}m** (${totalMins} Minuten)` })
             .setTimestamp();
     }
 
-    // Jahres-Statistik (aus der schlanken Aggregat-Tabelle)
+    // Jahres-Statistik (direkt aus year_times)
     async generateYearlyStatsEmbed(userId, targetDisplayName) {
         const res = await pool.query(
-            `SELECT SUM(total_minutes) as total FROM daily_user_stats 
+            `SELECT total_minutes FROM year_times 
              WHERE user_id = $1 
-               AND stat_date >= date_trunc('year', CURRENT_TIMESTAMP)`,
+               AND year = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)`,
             [userId]
         );
 
-        const totalMins = res.rows[0].total || 0;
+        const totalMins = res.rows[0]?.total_minutes || 0;
         const h = Math.floor(totalMins / 60);
         const m = totalMins % 60;
 
         return new EmbedBuilder()
             .setColor(0xE67E22)
             .setTitle(`🏆 JAHRES-STATISTIK: ${targetDisplayName}`)
-            .setDescription(`Gesamte Voice-Präsenz im laufenden Jahr`)
+            .setDescription(`Gesamte Voice-Präsenz im laufenden Jahr (aus year_times)`)
             .addFields({ name: 'Gesamtzeit', value: `🎙️ **${h}h ${m}m** (${totalMins} Minuten)` })
             .setTimestamp();
     }
