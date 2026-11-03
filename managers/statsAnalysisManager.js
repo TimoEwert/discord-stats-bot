@@ -7,7 +7,6 @@ class StatsAnalysisManager {
         this.name = "StatsAnalysisManager";
     }
 
-    // 1. Dropdown für Wochen-Stats (User-Auswahl)
     async sendWochenStatsMenu(interaction) {
         const selectMenu = new UserSelectMenuBuilder()
             .setCustomId('select_wochen_stats_user')
@@ -16,11 +15,7 @@ class StatsAnalysisManager {
             .setMaxValues(1);
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
-
-        const payload = {
-            content: '📊 Bitte wähle das gewünschte Mitglied für die Wochen-Ansicht aus:',
-            components: [row]
-        };
+        const payload = { content: '📊 Bitte wähle das gewünschte Mitglied für die Wochen-Ansicht aus:', components: [row] };
 
         if (interaction.isStringSelectMenu() || interaction.deferred || interaction.replied) {
             await interaction.followUp({ ...payload, flags: [64] });
@@ -29,7 +24,6 @@ class StatsAnalysisManager {
         }
     }
 
-    // 2. Dropdown für Monats-Stats (User-Auswahl)
     async sendMonatsStatsMenu(interaction) {
         const selectMenu = new UserSelectMenuBuilder()
             .setCustomId('select_monats_stats_user')
@@ -38,11 +32,7 @@ class StatsAnalysisManager {
             .setMaxValues(1);
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
-
-        const payload = {
-            content: '📅 Bitte wähle das gewünschte Mitglied für die Monats-Ansicht aus:',
-            components: [row]
-        };
+        const payload = { content: '📅 Bitte wähle das gewünschte Mitglied für die Monats-Ansicht aus:', components: [row] };
 
         if (interaction.isStringSelectMenu() || interaction.deferred || interaction.replied) {
             await interaction.followUp({ ...payload, flags: [64] });
@@ -51,7 +41,6 @@ class StatsAnalysisManager {
         }
     }
 
-    // 3. Dropdown für Jahres-Stats (User-Auswahl)
     async sendJahresStatsMenu(interaction) {
         const selectMenu = new UserSelectMenuBuilder()
             .setCustomId('select_jahres_stats_user')
@@ -60,11 +49,7 @@ class StatsAnalysisManager {
             .setMaxValues(1);
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
-
-        const payload = {
-            content: '🏆 Bitte wähle das gewünschte Mitglied für die Jahres-Ansicht aus:',
-            components: [row]
-        };
+        const payload = { content: '🏆 Bitte wähle das gewünschte Mitglied für die Jahres-Ansicht aus:', components: [row] };
 
         if (interaction.isStringSelectMenu() || interaction.deferred || interaction.replied) {
             await interaction.followUp({ ...payload, flags: [64] });
@@ -73,16 +58,15 @@ class StatsAnalysisManager {
         }
     }
 
-    // 4. Adminpanel /stats mit Funktions-Dropdown
     async sendAdminPanel(interaction) {
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('select_admin_panel_action')
             .setPlaceholder('Wähle eine Statistik-Aktion aus...')
             .addOptions([
-                { label: 'Wochen-Statistik (User wählen)', value: 'cmd_wochen', description: 'Minutengenaue Detailansicht der aktuellen Woche', emoji: '📊' },
+                { label: 'Wochen-Statistik (User wählen)', value: 'cmd_wochen', description: 'Detailansicht der aktuellen Woche', emoji: '📊' },
                 { label: 'Monats-Statistik (User wählen)', value: 'cmd_monat', description: 'Aggregierte Monatsübersicht', emoji: '📅' },
                 { label: 'Jahres-Statistik (User wählen)', value: 'cmd_jahr', description: 'Aggregierte Jahresübersicht', emoji: '🏆' },
-                { label: 'Heutige Voice-Präsenz (Alle)', value: 'cmd_heute', description: 'Übersicht wer heute in welchen Kanälen war', emoji: '🎙️' }
+                { label: 'Heutige Voice-Präsenz (Alle)', value: 'cmd_heute', description: 'Übersicht wer heute aktiv war', emoji: '🎙️' }
             ]);
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -94,11 +78,9 @@ class StatsAnalysisManager {
         });
     }
 
-    // Router für Interaktionen aus Select-Menüs
     async handleSelectMenu(interaction) {
         const customId = interaction.customId;
 
-        // Adminpanel-Verteilung
         if (customId === 'select_admin_panel_action') {
             await interaction.deferUpdate();
             const choice = interaction.values[0];
@@ -110,7 +92,6 @@ class StatsAnalysisManager {
             return;
         }
 
-        // User-Auswertungen verarbeiten
         if (['select_wochen_stats_user', 'select_monats_stats_user', 'select_jahres_stats_user'].includes(customId)) {
             await interaction.deferUpdate();
             const selectedUserId = interaction.values[0];
@@ -128,7 +109,7 @@ class StatsAnalysisManager {
 
             let embed;
             if (customId === 'select_wochen_stats_user') {
-                embed = await this.generateWeeklyHeatmapEmbed(interaction.guild, targetMember.id, cleanDisplayName);
+                embed = await this.generateWeeklyStatsEmbed(targetMember.id, cleanDisplayName);
             } else if (customId === 'select_monats_stats_user') {
                 embed = await this.generateMonthlyStatsEmbed(targetMember.id, cleanDisplayName);
             } else if (customId === 'select_jahres_stats_user') {
@@ -143,53 +124,45 @@ class StatsAnalysisManager {
         }
     }
 
-    // /heute Befehl
+    // Heutige Stats direkt aus der Kumulativ-Tabelle
     async showHeuteStats(interaction) {
         const isFromMenu = interaction.isStringSelectMenu && interaction.customId === 'select_admin_panel_action';
         if (!isFromMenu && !interaction.deferred && !interaction.replied) {
             await interaction.deferReply();
         }
 
+        const todayString = new Date().toISOString().split('T')[0];
+
         await pool.query("SET client_encoding = 'UTF8'");
         const res = await pool.query(
-            `SELECT user_id, joined_at, left_at, duration_minutes 
-             FROM voice_sessions 
-             WHERE joined_at >= date_trunc('day', CURRENT_TIMESTAMP)
-             ORDER BY joined_at DESC`
+            `SELECT user_id, total_minutes FROM user_time_stats WHERE stat_date = $1 ORDER BY total_minutes DESC`,
+            [todayString]
         );
 
         const embed = new EmbedBuilder()
             .setColor(0x2ECC71)
             .setTitle(`🎙️ HEUTIGE VOICE-AKTIVITÄT`)
-            .setDescription(`Übersicht aller Sprachkanal-Besuche des heutigen Tages`)
+            .setDescription(`Übersicht aller Voice-Minuten des heutigen Tages`)
             .setTimestamp();
 
         if (res.rows.length === 0) {
-            embed.addFields({ name: 'Keine Aktivität', value: 'Heute gab es bisher noch keine erfassten Voice-Sessions.' });
+            embed.addFields({ name: 'Keine Aktivität', value: 'Heute gab es bisher noch keine erfassten Voice-Zeiten.' });
         } else {
-            const userSessions = {};
+            let desc = '';
             for (const row of res.rows) {
-                if (!userSessions[row.user_id]) userSessions[row.user_id] = [];
-                let start = new Date(row.joined_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
-                let end = new Date(row.left_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
-                userSessions[row.user_id].push(`• ${start} - ${end} Uhr (${row.duration_minutes} Min.)`);
-            }
-
-            for (const [userId, sessions] of Object.entries(userSessions)) {
-                let displayName = `User ID: ${userId}`;
+                let displayName = `User ID: ${row.user_id}`;
                 try {
-                    const member = await interaction.guild.members.fetch(userId).catch(() => null);
+                    const member = await interaction.guild.members.fetch(row.user_id).catch(() => null);
                     if (member) {
                         displayName = member.displayName.replace(/^[🔴⚠️.]+/g, '').replace(/\s*\|\s*[🔥🛡️⚔️🗡️🏹👻❤️🔱]+$/g, '').trim();
                     }
                 } catch (e) {}
 
-                embed.addFields({
-                    name: `👤 ${displayName}`,
-                    value: sessions.slice(0, 5).join('\n') + (sessions.length > 5 ? `\n_(+ ${sessions.length - 5} weitere)_` : ''),
-                    inline: false
-                });
+                const h = Math.floor(row.total_minutes / 60);
+                const m = row.total_minutes % 60;
+                desc += `• **${displayName}** — 🎙️ **${h}h ${m}m** (${row.total_minutes} Min.)\n`;
             }
+            embed.setDescription(desc);
         }
 
         if (isFromMenu) {
@@ -199,112 +172,85 @@ class StatsAnalysisManager {
         }
     }
 
-    // Wochen-Details (minutengenau aus voice_sessions für die aktuelle Woche)
-    async generateWeeklyHeatmapEmbed(guild, userId, targetDisplayName) {
+    // Wochen-Statistik (Aktuelle KW)
+    async generateWeeklyStatsEmbed(userId, targetDisplayName) {
+        // Berechne aktuelle KW und Jahr
+        const now = new Date();
+        const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+        const dayNum = d.getUTCDay() || 7;
+        d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+        const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+        const currentWeek = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        const currentYear = d.getUTCFullYear();
+
         const res = await pool.query(
-            `SELECT joined_at, left_at, duration_minutes FROM voice_sessions 
-             WHERE user_id = $1 
-               AND joined_at >= date_trunc('week', CURRENT_TIMESTAMP)
-             ORDER BY joined_at ASC`,
-            [userId]
+            `SELECT stat_date, total_minutes FROM user_time_stats 
+             WHERE user_id = $1 AND year = $2 AND calendar_week = $3 
+             ORDER BY stat_date ASC`,
+            [userId, currentYear, currentWeek]
         );
+
+        const totalMins = res.rows.reduce((acc, row) => acc + row.total_minutes, 0);
+        const h = Math.floor(totalMins / 60);
+        const m = totalMins % 60;
 
         const embed = new EmbedBuilder()
             .setColor(0x3498DB)
-            .setTitle(`📊 WOCHEN-AKTIVITÄTSPROFIL: ${targetDisplayName}`)
-            .setDescription(`Minutengenaue Übersicht der Voice-Präsenz (Aktuelle Kalenderwoche)`)
+            .setTitle(`📊 WOCHEN-STATISTIK: ${targetDisplayName}`)
+            .setDescription(`Aktuelle Kalenderwoche (${currentWeek} / ${currentYear}) — Total: **${h}h ${m}m** (${totalMins} Min.)`)
             .setTimestamp();
 
         if (res.rows.length === 0) {
             embed.addFields({ name: 'Keine Daten', value: 'Für diesen User wurden in dieser Woche noch keine Zeiten erfasst.' });
-            return embed;
-        }
-
-        const dayNames = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
-        const sessionsPerDay = {};
-        const totalMinutesPerDay = {};
-        dayNames.forEach(d => { sessionsPerDay[d] = []; totalMinutesPerDay[d] = 0; });
-
-        for (const row of res.rows) {
-            let start = new Date(row.joined_at);
-            let end = new Date(row.left_at);
-            let duration = row.duration_minutes || 0;
-
-            let jsDay = start.getDay();
-            let dayName = dayNames[jsDay === 0 ? 6 : jsDay - 1];
-
-            let startTime = start.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
-            let endTime = end.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
-
-            sessionsPerDay[dayName].push(`• ${startTime} - ${endTime} Uhr (${duration} Min.)`);
-            totalMinutesPerDay[dayName] += duration;
-        }
-
-        for (const day of dayNames) {
-            if (sessionsPerDay[day].length > 0) {
-                embed.addFields({
-                    name: `📅 ${day} — Total: ${totalMinutesPerDay[day]} Min.`,
-                    value: sessionsPerDay[day].join('\n'),
-                    inline: false
-                });
+        } else {
+            let daysText = '';
+            for (const row of res.rows) {
+                let dateFormatted = new Date(row.stat_date).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit' });
+                daysText += `• **${dateFormatted}**: ${row.total_minutes} Minuten\n`;
             }
+            embed.addFields({ name: 'Tagesübersicht', value: daysText });
         }
         return embed;
     }
 
-    // Monats-Statistik (aus week_times für den aktuellen Monat)
+    // Monats-Statistik (Aktueller Monat)
     async generateMonthlyStatsEmbed(userId, targetDisplayName) {
-        // Ermittelt das aktuelle Jahr und den Monat, um die Wochensummen aus week_times zu aggregieren
         const res = await pool.query(
-            `SELECT SUM(total_minutes) as total FROM week_times 
+            `SELECT SUM(total_minutes) as total FROM user_time_stats 
              WHERE user_id = $1 
-               AND year = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)
-               -- Filter für Wochen, die in den aktuellen Monat fallen (grob über ISO-Wochen / Datum)
-               `,
+               AND stat_date >= date_trunc('month', CURRENT_TIMESTAMP)`,
             [userId]
         );
 
-        // Alternativ oder ergänzend: Da week_times Kalenderwochen speichert, summieren wir hier über die Wochen des Monats
-        const resMonth = await pool.query(
-            `SELECT SUM(wt.total_minutes) as total 
-             FROM week_times wt
-             JOIN (
-                 SELECT DISTINCT EXTRACT(WEEK FROM d)::int as cw, EXTRACT(YEAR FROM d)::int as yr
-                 FROM generate_series(date_trunc('month', CURRENT_TIMESTAMP), date_trunc('month', CURRENT_TIMESTAMP) + INTERVAL '1 month - 1 day', INTERVAL '1 day') d
-             ) m ON wt.calendar_week = m.cw AND wt.year = m.yr
-             WHERE wt.user_id = $1`,
-            [userId]
-        );
-
-        const totalMins = resMonth.rows[0].total || 0;
+        const totalMins = res.rows[0]?.total || 0;
         const h = Math.floor(totalMins / 60);
         const m = totalMins % 60;
 
         return new EmbedBuilder()
             .setColor(0x9B59B6)
             .setTitle(`📅 MONATS-STATISTIK: ${targetDisplayName}`)
-            .setDescription(`Gesamte Voice-Präsenz im aktuellen Kalendermonat (aus week_times)`)
+            .setDescription(`Gesamte Voice-Präsenz im aktuellen Kalendermonat`)
             .addFields({ name: 'Gesamtzeit', value: `🎙️ **${h}h ${m}m** (${totalMins} Minuten)` })
             .setTimestamp();
     }
 
-    // Jahres-Statistik (direkt aus year_times)
+    // Jahres-Statistik (Laufendes Jahr)
     async generateYearlyStatsEmbed(userId, targetDisplayName) {
         const res = await pool.query(
-            `SELECT total_minutes FROM year_times 
+            `SELECT SUM(total_minutes) as total FROM user_time_stats 
              WHERE user_id = $1 
                AND year = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)`,
             [userId]
         );
 
-        const totalMins = res.rows[0]?.total_minutes || 0;
+        const totalMins = res.rows[0]?.total || 0;
         const h = Math.floor(totalMins / 60);
         const m = totalMins % 60;
 
         return new EmbedBuilder()
             .setColor(0xE67E22)
             .setTitle(`🏆 JAHRES-STATISTIK: ${targetDisplayName}`)
-            .setDescription(`Gesamte Voice-Präsenz im laufenden Jahr (aus year_times)`)
+            .setDescription(`Gesamte Voice-Präsenz im laufenden Jahr`)
             .addFields({ name: 'Gesamtzeit', value: `🎙️ **${h}h ${m}m** (${totalMins} Minuten)` })
             .setTimestamp();
     }
