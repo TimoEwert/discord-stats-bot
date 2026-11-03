@@ -10,7 +10,6 @@ class StatsManager {
     async handleJoin(member) {
         if (!member || member.user.bot) return;
 
-        // Wir merken uns nur noch den exakten Startzeitpunkt zur User-ID
         activeVoiceSessions.set(member.id, {
             joinedAt: new Date()
         });
@@ -22,22 +21,36 @@ class StatsManager {
         if (!session) return;
 
         const leaveTime = new Date();
-        const durationSeconds = Math.floor((leaveTime - session.joinedAt) / 1000);
-        const durationMinutes = Math.max(1, Math.floor(durationSeconds / 60)); // Minutengenaue Abrechnung (mind. 1 Minute)
+        let currentJoin = new Date(session.joinedAt);
 
-        if (durationSeconds > 10) { // Ignoriere ultra-kurze Micro-Joins unter 10 Sek.
-            try {
-                // Speicherung erfolgt nun strikt über die unveränderliche User-ID
-                await pool.query(
-                    `INSERT INTO voice_sessions (user_id, joined_at, left_at, duration_seconds, duration_minutes) VALUES ($1, $2, $3, $4, $5)`,
-                    [member.id, session.joinedAt, leaveTime, durationSeconds, durationMinutes]
-                );
-                console.log(`📊 [STATS] Voice-Session für User-ID ${member.id} gespeichert: ${durationMinutes} Minuten.`);
-            } catch (err) {
-                console.error('❌ [STATS ERROR] Fehler beim Speichern der Session:', err);
-            }
-        }
         activeVoiceSessions.delete(member.id);
+
+        try {
+            await pool.query("SET client_encoding = 'UTF8'");
+
+            // Mitternachts-Splitting: Schleife bricht lange Sessions taggenau auf
+            while (currentJoin < leaveTime) {
+                const nextMidnight = new Date(currentJoin);
+                nextMidnight.setHours(24, 0, 0, 0); // 00:00:00 des Folgetages
+
+                let currentLeave = leaveTime < nextMidnight ? leaveTime : nextMidnight;
+
+                const durationSeconds = Math.floor((currentLeave - currentJoin) / 1000);
+                const durationMinutes = Math.max(1, Math.floor(durationSeconds / 60));
+
+                if (durationSeconds > 10) { // Ignoriere Micro-Joins unter 10 Sek.
+                    await pool.query(
+                        `INSERT INTO voice_sessions (user_id, joined_at, left_at, duration_seconds, duration_minutes) VALUES ($1, $2, $3, $4, $5)`,
+                        [member.id, currentJoin, currentLeave, durationSeconds, durationMinutes]
+                    );
+                    console.log(`📊 [STATS] Voice-Session Segment für ${member.id} gespeichert: ${currentJoin.toISOString()} bis ${currentLeave.toISOString()} (${durationMinutes} Min.)`);
+                }
+
+                currentJoin = nextMidnight;
+            }
+        } catch (err) {
+            console.error('❌ [STATS ERROR] Fehler beim Mitternachts-Splitting der Session:', err);
+        }
     }
 }
 
