@@ -34,7 +34,8 @@ client.once('clientReady', async () => {
     } catch (error) {
         console.error("❌ [DISCORD ERROR]:", error);
     }
-
+    // ⏰ Hier fügst du den periodischen Perioden-Überwachungsdienst ein:
+    statsManager.initPeriodicCheck();
     // 🔄 Automatischer Kanalnamen-Überwachungsdienst (1-Minuten-Takt)
     console.log(`✅ [AUTO-CHECK] Starte automatischen Kanalnamen-Überwachungsdienst (1-Minuten-Takt)...`);
     setInterval(async () => {
