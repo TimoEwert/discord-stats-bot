@@ -8,6 +8,8 @@ const statsManager = require('./managers/statsManager');
 const visualManager = require('./managers/visualManager');
 const nicknameManager = require('./managers/nicknameManager');
 const commandManager = require('./managers/commandManager');
+const statsPostManager = require('./managers/statsPost');
+const userOfTheWeekManager = require('./managers/useroftheweek');
 
 const client = new Client({
     intents: [
@@ -25,6 +27,22 @@ process.on('unhandledRejection', error => {
 client.once('clientReady', async () => {
     console.log(`✅ [INIT] Bot online als ${client.user.tag}`);
     await initDatabase();
+
+    // Cronjobs / Hintergrund-Timer für Automationen starten
+    statsPostManager.initCron(client);
+    
+    const guild = client.guilds.cache.first();
+    if (guild) {
+        userOfTheWeekManager.initCron(guild);
+    } else {
+        // Fallback falls der Cache beim Start leer ist
+        client.guilds.fetch().then(guilds => {
+            const firstGuild = guilds.first();
+            if (firstGuild) {
+                client.guilds.fetch(firstGuild.id).then(g => userOfTheWeekManager.initCron(g));
+            }
+        });
+    }
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
