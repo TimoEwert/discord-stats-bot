@@ -4,6 +4,7 @@ const { pool } = require('../database');
 const statsAnalysisManager = require('./statsAnalysisManager');
 const nicknameManager = require('./nicknameManager');
 const statsPostManager = require('./statsPost');
+const userOfTheWeekManager = require('./useroftheweek');
 
 class CommandManager {
     constructor() {
@@ -21,8 +22,8 @@ class CommandManager {
             new SlashCommandBuilder().setName('ranking_aries').setDescription('Zeigt das Voice-Ranking der aktuellen Woche'),
             new SlashCommandBuilder().setName('save_channel_refs').setDescription('Speichert Kanal-Referenzen').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('reset_channel_refs').setDescription('Setzt Kanäle zurück').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-            new SlashCommandBuilder().setName('test_post_stats').setDescription('Testet den wöchentlichen Voice-Rückblick manuell').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-            new SlashCommandBuilder().setName('test_king').setDescription('Testet die König-der-Woche-Auswertung manuell').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+            new SlashCommandBuilder().setName('test_post_stats').setDescription('Testet den wöchentlichen Voice-Rückblick manuell').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+            new SlashCommandBuilder().setName('test_king').setDescription('Testet die König-der-Woche-Auswertung manuell').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         ];
     }
 
@@ -60,6 +61,16 @@ class CommandManager {
                     await interaction.editReply({ content: '✅ Der detaillierte Wochen-Rückblick wurde erfolgreich in diesen Kanal gepostet!' });
                 } else {
                     await interaction.editReply({ content: '❌ Fehler beim Erstellen des Wochen-Rückblicks.' });
+                }
+            }
+            else if (interaction.commandName === 'test_king') {
+                await interaction.deferReply({ flags: [64] });
+                const success = await userOfTheWeekManager.updateKingOfWeek(interaction.guild);
+
+                if (success) {
+                    await interaction.editReply({ content: `✅ König-der-Woche-Test erfolgreich ausgeführt! Neuer König wurde ermittelt und gekrönt.` });
+                } else {
+                    await interaction.editReply({ content: `❌ Test fehlgeschlagen oder keine Voice-Daten für diese Woche vorhanden.` });
                 }
             }
             else if (interaction.commandName === 'save_channel_refs') {
@@ -116,7 +127,6 @@ class CommandManager {
             }
             else if (interaction.commandName === 'ranking_aries') {
                 await interaction.deferReply();
-                // Wieder zurück auf voice_sessions gestellt, damit es sich wöchentlich leert
                 const result = await pool.query(`SELECT user_id, SUM(duration_minutes) as total_minutes FROM voice_sessions GROUP BY user_id ORDER BY total_minutes DESC LIMIT 10`);
                 const embed = new EmbedBuilder().setColor(0x00AE86).setTitle('🏆 ARIES COMMUNITY - VOICE RANKING (AKTUELL)').setTimestamp();
                 
@@ -158,17 +168,6 @@ class CommandManager {
                     }
                 }
                 await interaction.editReply(`✅ Nicknames für **${updatedCount}** Mitglieder synchronisiert.`);
-            else if (interaction.commandName === 'test_king') {
-    await interaction.deferReply({ flags: [64] });
-    const userOfTheWeekManager = require('./useroftheweek');
-    const success = await userOfTheWeekManager.updateKingOfWeek(interaction.guild);
-
-    if (success) {
-        await interaction.editReply({ content: `✅ König-der-Woche-Test erfolgreich ausgeführt! Neuer König wurde ermittelt und gekrönt.` });
-    } else {
-        await interaction.editReply({ content: `❌ Test fehlgeschlagen oder keine Voice-Daten für diese Woche vorhanden.` });
-    }
-}
             }
         } catch (e) {
             console.error("❌ [COMMAND ERROR]:", e);
