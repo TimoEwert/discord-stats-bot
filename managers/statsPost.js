@@ -4,7 +4,7 @@ const { pool } = require('../database');
 const cron = require('node-cron');
 
 // HIER DEINE CHANNEL-ID EINTRAGEN (oder über process.env.STATS_CHANNEL_ID steuern):
-const STATS_CHANNEL_ID = process.env.STATS_CHANNEL_ID || 'DEINE_CHANNEL_ID_HIER';
+const STATS_CHANNEL_ID = process.env.STATS_CHANNEL_ID || 'deine channelid hier';
 
 class StatsPostManager {
     constructor() {
