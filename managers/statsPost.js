@@ -8,6 +8,16 @@ const getStatsChannelIds = () => {
     return raw.split(',').map(id => id.trim()).filter(id => id.length > 0);
 };
 
+// Hilfsfunktion zur Ermittlung der aktuellen Kalenderwoche
+const getCurrentCalendarWeek = () => {
+    const now = new Date();
+    const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+};
+
 class StatsPostManager {
     constructor() {
         this.name = "StatsPostManager";
@@ -42,6 +52,8 @@ class StatsPostManager {
                 return false;
             }
 
+            const currentKW = getCurrentCalendarWeek();
+
             const res = await pool.query(
                 `SELECT user_id, joined_at, left_at, duration_minutes 
                  FROM voice_sessions 
@@ -50,7 +62,7 @@ class StatsPostManager {
 
             const embed = new EmbedBuilder()
                 .setColor(0x9B59B6)
-                .setTitle(`📜 WÖCHENTLICHER VOICE-RÜCKBLICK`)
+                .setTitle(`📜 WÖCHENTLICHER VOICE-RÜCKBLICK (KW ${currentKW})`)
                 .setDescription(`Detaillierte Übersicht aller Sprachkanal-Aktivitäten der vergangenen Woche\n──────────────────────────────`)
                 .setTimestamp();
 
@@ -119,13 +131,12 @@ class StatsPostManager {
                         detailsText = detailsText.substring(0, 850) + '\n... (weitere Intervalle gekürzt)';
                     }
 
-                    // Nach jedem User (außer dem letzten) eine schicke Trennlinie hinzufügen
                     if (index < entries.length - 1) {
                         detailsText += `\n──────────────────────────────`;
                     }
 
                     embed.addFields({
-                        name: `👤 ${displayName} — Gesamt: ${h}h ${m}m`,
+                        name: `👤 ${displayName} — Gesamt: ${h}h ${m}m (KW ${currentKW})`,
                         value: detailsText || 'Keine Intervalle',
                         inline: false
                     });
