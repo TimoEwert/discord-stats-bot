@@ -22,6 +22,7 @@ class CommandManager {
             new SlashCommandBuilder().setName('save_channel_refs').setDescription('Speichert Kanal-Referenzen').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('reset_channel_refs').setDescription('Setzt Kanäle zurück').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
             new SlashCommandBuilder().setName('test_post_stats').setDescription('Testet den wöchentlichen Voice-Rückblick manuell').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            new SlashCommandBuilder().setName('test_king').setDescription('Testet die König-der-Woche-Auswertung manuell').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
         ];
     }
 
@@ -157,6 +158,17 @@ class CommandManager {
                     }
                 }
                 await interaction.editReply(`✅ Nicknames für **${updatedCount}** Mitglieder synchronisiert.`);
+            else if (interaction.commandName === 'test_king') {
+    await interaction.deferReply({ flags: [64] });
+    const userOfTheWeekManager = require('./useroftheweek');
+    const success = await userOfTheWeekManager.updateKingOfWeek(interaction.guild);
+
+    if (success) {
+        await interaction.editReply({ content: `✅ König-der-Woche-Test erfolgreich ausgeführt! Neuer König wurde ermittelt und gekrönt.` });
+    } else {
+        await interaction.editReply({ content: `❌ Test fehlgeschlagen oder keine Voice-Daten für diese Woche vorhanden.` });
+    }
+}
             }
         } catch (e) {
             console.error("❌ [COMMAND ERROR]:", e);
