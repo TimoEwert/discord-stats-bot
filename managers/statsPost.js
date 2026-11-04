@@ -3,7 +3,6 @@ const { EmbedBuilder } = require('discord.js');
 const { pool } = require('../database');
 const cron = require('node-cron');
 
-// Mehrere Channel-IDs (getrennt durch Komma in der .env oder hier direkt als Array)
 const getStatsChannelIds = () => {
     const raw = process.env.STATS_CHANNEL_ID || 'DEINE_CHANNEL_ID_HIER';
     return raw.split(',').map(id => id.trim()).filter(id => id.length > 0);
@@ -26,7 +25,6 @@ class StatsPostManager {
         try {
             await pool.query("SET client_encoding = 'UTF8'");
 
-            // Ziel-Kanäle bestimmen (entweder der übergebene Test-Channel oder alle aus der Konfiguration)
             let targetChannels = [];
             if (customChannel) {
                 targetChannels = [customChannel];
@@ -44,7 +42,6 @@ class StatsPostManager {
                 return false;
             }
 
-            // Alle Sessions der aktuellen Woche abfragen
             const res = await pool.query(
                 `SELECT user_id, joined_at, left_at, duration_minutes 
                  FROM voice_sessions 
@@ -54,7 +51,7 @@ class StatsPostManager {
             const embed = new EmbedBuilder()
                 .setColor(0x9B59B6)
                 .setTitle(`📜 WÖCHENTLICHER VOICE-RÜCKBLICK`)
-                .setDescription(`Detaillierte Übersicht aller Sprachkanal-Aktivitäten der vergangenen Woche`)
+                .setDescription(`Detaillierte Übersicht aller Sprachkanal-Aktivitäten der vergangenen Woche\n──────────────────────────────`)
                 .setTimestamp();
 
             if (res.rows.length === 0) {
@@ -91,10 +88,12 @@ class StatsPostManager {
                     userMap[userId].days[dayFormatted].push(`${timeFrom} - ${timeTo} Uhr (${row.duration_minutes} Min.)`);
                 }
 
-                for (const [userId, data] of Object.entries(userMap)) {
+                const entries = Object.entries(userMap);
+                for (let index = 0; index < entries.length; index++) {
+                    const [userId, data] = entries[index];
+
                     let displayName = `User ID: ${userId}`;
                     try {
-                        // Nimm die Guild vom ersten Ziel-Channel für den Namens-Lookup
                         const guild = targetChannels[0].guild;
                         if (guild) {
                             const member = await guild.members.fetch(userId).catch(() => null);
@@ -116,8 +115,13 @@ class StatsPostManager {
                         detailsText += intervals.map(i => `  • ${i}`).join('\n') + '\n';
                     }
 
-                    if (detailsText.length > 1000) {
-                        detailsText = detailsText.substring(0, 950) + '\n... (weitere Intervalle gekürzt)';
+                    if (detailsText.length > 900) {
+                        detailsText = detailsText.substring(0, 850) + '\n... (weitere Intervalle gekürzt)';
+                    }
+
+                    // Nach jedem User (außer dem letzten) eine schicke Trennlinie hinzufügen
+                    if (index < entries.length - 1) {
+                        detailsText += `\n──────────────────────────────`;
                     }
 
                     embed.addFields({
@@ -128,7 +132,6 @@ class StatsPostManager {
                 }
             }
 
-            // An alle Ziel-Kanäle senden
             for (const channel of targetChannels) {
                 await channel.send({ embeds: [embed] }).catch(err => {
                     console.error(`❌ [StatsPostManager] Konnte Nachricht nicht in Channel ${channel.id} senden:`, err);
