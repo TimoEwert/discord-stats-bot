@@ -3,19 +3,18 @@ const { EmbedBuilder } = require('discord.js');
 const { pool } = require('../database');
 const cron = require('node-cron');
 
-// HIER DEINE CHANNEL-ID EINTRAGEN (oder über process.env.STATS_CHANNEL_ID steuern):
-const STATS_CHANNEL_ID = process.env.STATS_CHANNEL_ID || 'deine channelid hier';
+// Mehrere Channel-IDs (getrennt durch Komma in der .env oder hier direkt als Array)
+const getStatsChannelIds = () => {
+    const raw = process.env.STATS_CHANNEL_ID || 'DEINE_CHANNEL_ID_HIER';
+    return raw.split(',').map(id => id.trim()).filter(id => id.length > 0);
+};
 
 class StatsPostManager {
     constructor() {
         this.name = "StatsPostManager";
     }
 
-    /**
-     * Startet den automatischen Cronjob für Sonntag 23:45 Uhr
-     */
     initCron(client) {
-        // Cron-Syntax: 45 (Minute) 23 (Stunde) * (Jeder Tag) * (Jeder Monat) 0 (Sonntag)
         cron.schedule('45 23 * * 0', async () => {
             console.log('⏰ [CRON] Starte wöchentlichen Voice-Stats Rückblick...');
             await this.postWeeklyDetailedStats(client);
@@ -23,22 +22,29 @@ class StatsPostManager {
         console.log('✅ [StatsPostManager] Wöchentlicher Cronjob (Sonntag 23:45 Uhr) wurde erfolgreich registriert.');
     }
 
-    /**
-     * Holt die detaillierten Rohdaten aus voice_sessions und sendet das Embed
-     */
     async postWeeklyDetailedStats(client, customChannel = null) {
         try {
             await pool.query("SET client_encoding = 'UTF8'");
 
-            const channelId = customChannel ? customChannel.id : STATS_CHANNEL_ID;
-            const targetChannel = customChannel || await client.channels.fetch(channelId).catch(() => null);
+            // Ziel-Kanäle bestimmen (entweder der übergebene Test-Channel oder alle aus der Konfiguration)
+            let targetChannels = [];
+            if (customChannel) {
+                targetChannels = [customChannel];
+            } else {
+                const ids = getStatsChannelIds();
+                for (const id of ids) {
+                    const ch = await client.channels.fetch(id).catch(() => null);
+                    if (ch) targetChannels.push(ch);
+                    else console.error(`❌ [StatsPostManager] Channel mit ID "${id}" konnte nicht gefunden werden!`);
+                }
+            }
 
-            if (!targetChannel) {
-                console.error(`❌ [StatsPostManager] Channel mit ID "${channelId}" konnte nicht gefunden werden!`);
+            if (targetChannels.length === 0) {
+                console.error(`❌ [StatsPostManager] Keine gültigen Ziel-Channels für den Wochen-Rückblick gefunden!`);
                 return false;
             }
 
-            // Alle Sessions der aktuellen Woche aus voice_sessions abfragen
+            // Alle Sessions der aktuellen Woche abfragen
             const res = await pool.query(
                 `SELECT user_id, joined_at, left_at, duration_minutes 
                  FROM voice_sessions 
@@ -88,7 +94,8 @@ class StatsPostManager {
                 for (const [userId, data] of Object.entries(userMap)) {
                     let displayName = `User ID: ${userId}`;
                     try {
-                        const guild = targetChannel.guild;
+                        // Nimm die Guild vom ersten Ziel-Channel für den Namens-Lookup
+                        const guild = targetChannels[0].guild;
                         if (guild) {
                             const member = await guild.members.fetch(userId).catch(() => null);
                             if (member) {
@@ -121,8 +128,14 @@ class StatsPostManager {
                 }
             }
 
-            await targetChannel.send({ embeds: [embed] });
-            console.log(`✅ [StatsPostManager] Wöchentlicher Rückblick erfolgreich gepostet.`);
+            // An alle Ziel-Kanäle senden
+            for (const channel of targetChannels) {
+                await channel.send({ embeds: [embed] }).catch(err => {
+                    console.error(`❌ [StatsPostManager] Konnte Nachricht nicht in Channel ${channel.id} senden:`, err);
+                });
+            }
+
+            console.log(`✅ [StatsPostManager] Wöchentlicher Rückblick erfolgreich an ${targetChannels.length} Kanal/Kanäle gesendet.`);
             return true;
 
         } catch (err) {
