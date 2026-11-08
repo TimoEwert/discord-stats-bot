@@ -60,14 +60,10 @@ class StatsPostManager {
                  ORDER BY joined_at ASC`
             );
 
-            const embed = new EmbedBuilder()
-                .setColor(0x9B59B6)
-                .setTitle(`📜 WÖCHENTLICHER VOICE-RÜCKBLICK (KW ${currentKW})`)
-                .setDescription(`Detaillierte Übersicht aller Sprachkanal-Aktivitäten der vergangenen Woche\n──────────────────────────────`)
-                .setTimestamp();
+            const fields = [];
 
             if (res.rows.length === 0) {
-                embed.addFields({ 
+                fields.push({ 
                     name: 'Keine Aktivität', 
                     value: 'In dieser Woche wurden keine detaillierten Voice-Sessions aufgezeichnet.' 
                 });
@@ -135,7 +131,7 @@ class StatsPostManager {
                         detailsText += `\n──────────────────────────────`;
                     }
 
-                    embed.addFields({
+                    fields.push({
                         name: `👤 ${displayName} — Gesamt: ${h}h ${m}m (KW ${currentKW})`,
                         value: detailsText || 'Keine Intervalle',
                         inline: false
@@ -143,13 +139,36 @@ class StatsPostManager {
                 }
             }
 
-            for (const channel of targetChannels) {
-                await channel.send({ embeds: [embed] }).catch(err => {
-                    console.error(`❌ [StatsPostManager] Konnte Nachricht nicht in Channel ${channel.id} senden:`, err);
-                });
+            // Felder in Häppchen von max. 5 Usern pro Nachricht aufteilen, um das 6000-Zeichen-Limit zu umgehen
+            const chunkSize = 5;
+            const chunkedFields = [];
+            for (let i = 0; i < fields.length; i += chunkSize) {
+                chunkedFields.push(fields.slice(i, i + chunkSize));
             }
 
-            console.log(`✅ [StatsPostManager] Wöchentlicher Rückblick erfolgreich an ${targetChannels.length} Kanal/Kanäle gesendet.`);
+            const messagesToSend = chunkedFields.map((chunk, chunkIndex) => {
+                const embed = new EmbedBuilder()
+                    .setColor(0x9B59B6)
+                    .setTitle(chunkIndex === 0 ? `📜 WÖCHENTLICHER VOICE-RÜCKBLICK (KW ${currentKW})` : `📜 WÖCHENTLICHER VOICE-RÜCKBLICK (KW ${currentKW}) — Teil ${chunkIndex + 1}`)
+                    .setDescription(chunkIndex === 0 ? `Detaillierte Übersicht aller Sprachkanal-Aktivitäten der vergangenen Woche\n──────────────────────────────` : `──────────────────────────────`)
+                    .setTimestamp();
+
+                embed.addFields(chunk);
+                return { embeds: [embed] };
+            });
+
+            // An alle Ziel-Kanäle senden (mit 1 Sekunde Abstand zwischen den Teilstücken)
+            for (const channel of targetChannels) {
+                for (const msgPayload of messagesToSend) {
+                    await channel.send(msgPayload).catch(err => {
+                        console.error(`❌ [StatsPostManager] Konnte Nachricht nicht in Channel ${channel.id} senden:`, err);
+                    });
+                    // 1 Sekunde Pause zwischen den Nachrichten einhalten
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+
+            console.log(`✅ [StatsPostManager] Wöchentlicher Rückblick erfolgreich in ${messagesToSend.length} Teilen an ${targetChannels.length} Kanal/Kanäle gesendet.`);
             return true;
 
         } catch (err) {
