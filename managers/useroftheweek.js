@@ -6,11 +6,11 @@ const cron = require('node-cron');
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 
 const DATA_FILE = path.join(__dirname, '../data/current_king.json');
-const KING_IMAGE_PATH = path.join(__dirname, '../data/koenig.jpg');
+const KING_IMAGE_PATH = path.join(__dirname, '../data/könig.jpg');
 const KING_EMOJI = '👑 ';
 
-const getStatsChannelIds = () => {
-    const raw = process.env.STATS_CHANNEL_ID || '';
+const getKingChannelIds = () => {
+    const raw = process.env.KING_CHANNEL_ID || '';
     return raw.split(',').map(id => id.trim()).filter(id => id.length > 0);
 };
 
@@ -53,7 +53,6 @@ class UserOfTheWeekManager {
     }
 
     initCron(client) {
-        // Sonntag um 23:50 Uhr (kurz nach dem Stats-Post)
         cron.schedule('50 23 * * 0', async () => {
             console.log('⏰ [CRON] Starte Auswertung des Königs der Woche...');
             const guild = client.guilds.cache.first();
@@ -70,7 +69,6 @@ class UserOfTheWeekManager {
         try {
             await pool.query("SET client_encoding = 'UTF8'");
 
-            // Aktivsten User der aktuellen Woche aus user_time_stats ermitteln
             const res = await pool.query(`
                 SELECT user_id, SUM(total_minutes) as total_mins
                 FROM user_time_stats
@@ -89,7 +87,6 @@ class UserOfTheWeekManager {
             const newKingId = res.rows[0].user_id;
             const currentKingData = this.getKingData();
 
-            // Alten König entthronen und Original-Namen wiederherstellen (bei Wechsel)
             if (currentKingData.kingUserId && currentKingData.kingUserId !== newKingId) {
                 const oldMember = await guild.members.fetch(currentKingData.kingUserId).catch(() => null);
                 if (oldMember) {
@@ -103,7 +100,6 @@ class UserOfTheWeekManager {
                 }
             }
 
-            // Neuen König holen & krönen
             const newMember = await guild.members.fetch(newKingId).catch(() => null);
             if (!newMember) {
                 console.error(`❌ [UserOfTheWeekManager] Neuer König ID ${newKingId} nicht auf dem Server gefunden.`);
@@ -126,8 +122,8 @@ class UserOfTheWeekManager {
 
             this.saveKingData(newKingId, originalNick);
 
-            // 1. ANKÜNDIGUNG IN TEXTCHANNELS SENDEN (MIT BILD ALS HEADER)
-            const channelIds = getStatsChannelIds();
+            // KRÖNUNGS-NACHRICHT AN KING_CHANNEL_ID SENDEN
+            const channelIds = getKingChannelIds();
             for (const channelId of channelIds) {
                 const channel = await client.channels.fetch(channelId).catch(() => null);
                 if (channel) {
@@ -150,7 +146,7 @@ class UserOfTheWeekManager {
                 }
             }
 
-            // 2. DATENBANK FÜR DIE NEUE WOCHE LEEREN
+            // DATENBANK FÜR DIE NEUE WOCHE LEEREN
             await pool.query("DELETE FROM voice_sessions");
             console.log('🧹 [UserOfTheWeekManager] Tabelle voice_sessions wurde erfolgreich geleert.');
 
