@@ -65,9 +65,12 @@ class UserOfTheWeekManager {
         console.log('✅ [UserOfTheWeekManager] Wöchentlicher Cronjob (Sonntag 23:50 Uhr) wurde erfolgreich registriert.');
     }
 
-    async updateKingOfWeek(guild, client) {
+    async updateKingOfWeek(guild, client = null) {
         try {
             await pool.query("SET client_encoding = 'UTF8'");
+
+            // Client sicherstellen (Fallback über guild.client, falls nicht mit übergeben)
+            const discordClient = client || guild.client;
 
             const res = await pool.query(`
                 SELECT user_id, SUM(total_minutes) as total_mins
@@ -125,7 +128,7 @@ class UserOfTheWeekManager {
             // KRÖNUNGS-NACHRICHT AN KING_CHANNEL_ID SENDEN
             const channelIds = getKingChannelIds();
             for (const channelId of channelIds) {
-                const channel = await client.channels.fetch(channelId).catch(() => null);
+                const channel = await discordClient.channels.fetch(channelId).catch(() => null);
                 if (channel) {
                     const embed = new EmbedBuilder()
                         .setColor(0xFFD700)
