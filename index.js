@@ -31,18 +31,8 @@ client.once('clientReady', async () => {
     // Cronjobs / Hintergrund-Timer für Automationen starten
     statsPostManager.initCron(client);
     
-    const guild = client.guilds.cache.first();
-    if (guild) {
-        userOfTheWeekManager.initCron(guild);
-    } else {
-        // Fallback falls der Cache beim Start leer ist
-        client.guilds.fetch().then(guilds => {
-            const firstGuild = guilds.first();
-            if (firstGuild) {
-                client.guilds.fetch(firstGuild.id).then(g => userOfTheWeekManager.initCron(g));
-            }
-        });
-    }
+    // User of the Week Cronjob mit dem Client initialisieren
+    userOfTheWeekManager.initCron(client);
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
