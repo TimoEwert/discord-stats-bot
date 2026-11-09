@@ -6,7 +6,7 @@ const cron = require('node-cron');
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 
 const DATA_FILE = path.join(__dirname, '../data/current_king.json');
-const KING_IMAGE_PATH = path.join(__dirname, '../data/könig.jpg');
+const KING_IMAGE_PATH = path.join(__dirname, '../data/koenig.jpg');
 const KING_EMOJI = '👑 ';
 
 const getStatsChannelIds = () => {
