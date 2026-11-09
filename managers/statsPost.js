@@ -4,7 +4,7 @@ const { pool } = require('../database');
 const cron = require('node-cron');
 
 const getStatsChannelIds = () => {
-    const raw = process.env.STATS_CHANNEL_ID || 'DEINE_CHANNEL_ID_HIER';
+    const raw = process.env.STATS_CHANNEL_ID || '';
     return raw.split(',').map(id => id.trim()).filter(id => id.length > 0);
 };
 
@@ -139,7 +139,6 @@ class StatsPostManager {
                 }
             }
 
-            // Felder in Häppchen von max. 5 Usern pro Nachricht aufteilen, um das 6000-Zeichen-Limit zu umgehen
             const chunkSize = 5;
             const chunkedFields = [];
             for (let i = 0; i < fields.length; i += chunkSize) {
@@ -157,13 +156,11 @@ class StatsPostManager {
                 return { embeds: [embed] };
             });
 
-            // An alle Ziel-Kanäle senden (mit 1 Sekunde Abstand zwischen den Teilstücken)
             for (const channel of targetChannels) {
                 for (const msgPayload of messagesToSend) {
                     await channel.send(msgPayload).catch(err => {
                         console.error(`❌ [StatsPostManager] Konnte Nachricht nicht in Channel ${channel.id} senden:`, err);
                     });
-                    // 1 Sekunde Pause zwischen den Nachrichten einhalten
                     await new Promise(r => setTimeout(r, 1000));
                 }
             }
