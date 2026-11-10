@@ -69,7 +69,6 @@ class UserOfTheWeekManager {
         try {
             await pool.query("SET client_encoding = 'UTF8'");
 
-            // Client sicherstellen (Fallback über guild.client, falls nicht mit übergeben)
             const discordClient = client || guild.client;
 
             const res = await pool.query(`
@@ -90,11 +89,12 @@ class UserOfTheWeekManager {
             const newKingId = res.rows[0].user_id;
             const currentKingData = this.getKingData();
 
+            // 1. Alten König entthronen (falls es einen Wechsel gibt)
             if (currentKingData.kingUserId && currentKingData.kingUserId !== newKingId) {
                 const oldMember = await guild.members.fetch(currentKingData.kingUserId).catch(() => null);
                 if (oldMember) {
                     try {
-                        const restoredName = currentKingData.originalNickname || oldMember.displayName.replace(KING_EMOJI, '').trim();
+                        const restoredName = currentKingData.originalNickname || oldMember.displayName.replace(/^👑\s*/, '').trim();
                         await oldMember.setNickname(restoredName);
                         console.log(`🗡️ [UserOfTheWeekManager] Entthront: ${oldMember.user.tag} -> "${restoredName}"`);
                     } catch (err) {
@@ -103,16 +103,22 @@ class UserOfTheWeekManager {
                 }
             }
 
+            // 2. Neuen König holen
             const newMember = await guild.members.fetch(newKingId).catch(() => null);
             if (!newMember) {
                 console.error(`❌ [UserOfTheWeekManager] Neuer König ID ${newKingId} nicht auf dem Server gefunden.`);
                 return false;
             }
 
-            const originalNick = newMember.nickname || newMember.user.username;
+            // SICHERHEIT: Sauberen Originalnamen ermitteln (eventuelle Alt-Kronen vorher restlos entfernen)
+            const currentDisplayName = newMember.nickname || newMember.user.username;
+            const cleanOriginalNick = currentDisplayName.replace(/^👑\s*/, '').trim();
+            const originalNick = currentKingData.kingUserId === newKingId ? (currentKingData.originalNickname || cleanOriginalNick) : cleanOriginalNick;
+            
             const crownedNick = `${KING_EMOJI}${originalNick}`;
 
-            if (currentKingData.kingUserId !== newKingId) {
+            // Prüfen, ob der Name nicht ohnehin schon die exakte Krone hat
+            if (currentDisplayName !== crownedNick) {
                 try {
                     await newMember.setNickname(crownedNick);
                     console.log(`👑 [UserOfTheWeekManager] Gekrönt: ${newMember.user.tag} -> "${crownedNick}"`);
@@ -120,12 +126,12 @@ class UserOfTheWeekManager {
                     console.error(`❌ [UserOfTheWeekManager] Konnte Nickname für neuen König nicht ändern (Rechte prüfen):`, err.message);
                 }
             } else {
-                console.log(`👑 [UserOfTheWeekManager] User <@${newKingId}> bleibt weiterhin König der Woche!`);
+                console.log(`👑 [UserOfTheWeekManager] User <@${newKingId}> trägt bereits die Krone.`);
             }
 
             this.saveKingData(newKingId, originalNick);
 
-            // KRÖNUNGS-NACHRICHT AN KING_CHANNEL_ID SENDEN
+            // 3. KRÖNUNGS-NACHRICHT AN KING_CHANNEL_ID SENDEN
             const channelIds = getKingChannelIds();
             for (const channelId of channelIds) {
                 const channel = await discordClient.channels.fetch(channelId).catch(() => null);
@@ -149,7 +155,7 @@ class UserOfTheWeekManager {
                 }
             }
 
-            // DATENBANK FÜR DIE NEUE WOCHE LEEREN
+            // 4. DATENBANK FÜR DIE NEUE WOCHE LEEREN
             await pool.query("DELETE FROM voice_sessions");
             console.log('🧹 [UserOfTheWeekManager] Tabelle voice_sessions wurde erfolgreich geleert.');
 
